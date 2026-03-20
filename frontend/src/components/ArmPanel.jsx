@@ -4,17 +4,16 @@
  */
 import React from 'react'
 
-const ARM_LABELS = ['Arm A', 'Arm B', 'Arm C', 'Arm D', 'Arm E']
-
-export default function ArmPanel({ policy, values, counts, lastArm, onPull, color, loading }) {
+export default function ArmPanel({ policy, values, counts, lastArm, onPull, color, loading, labels }) {
   const maxVal = Math.max(...values, 0.001)
   const bestArm = values.indexOf(Math.max(...values))
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${values.length}, 1fr)`, gap: 8 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(values.length, 6)}, 1fr)`, gap: 8 }}>
       {values.map((val, i) => {
         const isBest = i === bestArm && counts.reduce((a, b) => a + b, 0) > 0
         const isLast = i === lastArm
+        const label = labels && labels[i] ? labels[i] : `Arm ${String.fromCharCode(65 + i)}`
         return (
           <button
             key={i}
@@ -33,8 +32,8 @@ export default function ArmPanel({ policy, values, counts, lastArm, onPull, colo
               outline: isLast ? `2px solid ${color}44` : 'none',
             }}
           >
-            <div style={{ fontSize: 10, color: 'var(--color-text-secondary)', marginBottom: 4, fontFamily: 'var(--font-mono)' }}>
-              {ARM_LABELS[i]} (n={counts[i]})
+            <div style={{ fontSize: 10, color: 'var(--color-text-secondary)', marginBottom: 4, fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {label} (n={counts[i]})
             </div>
             <div style={{ fontSize: 16, fontWeight: 500, color: isBest ? color : 'var(--color-text-primary)', fontFamily: 'var(--font-mono)' }}>
               {val.toFixed(2)}

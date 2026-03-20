@@ -4,29 +4,35 @@
  * Connects all components. Maintains one bandit state per policy so
  * switching tabs preserves experiment history for the session.
  */
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import ArmPanel from './components/ArmPanel'
 import Charts from './components/Charts'
+import PosteriorChart from './components/PosteriorChart'
+import ConvergencePanel from './components/ConvergencePanel'
+import ArmConfigurator from './components/ArmConfigurator'
+import PolicyRace from './components/PolicyRace'
 import { useBandit } from './hooks/useBandit'
 import * as sim from './lib/simulation'
+import { DRIFT_PATTERNS } from './lib/scenarios'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const POLICIES = [
-  { id: 'epsilon-greedy',    label: 'ε-Greedy',   meta: 'ε=0.1 · non-contextual', color: '#E89320' },
-  { id: 'ucb',               label: 'UCB1',        meta: 'c=2 · non-contextual',   color: '#378ADD' },
+  { id: 'epsilon-greedy',    label: '\u03b5-Greedy',   meta: '\u03b5=0.1 \u00b7 non-contextual', color: '#E89320' },
+  { id: 'ucb',               label: 'UCB1',        meta: 'c=2 \u00b7 non-contextual',   color: '#378ADD' },
   { id: 'thompson-sampling', label: 'Thompson',    meta: 'Beta posterior',         color: '#1D9E75' },
-  { id: 'linucb',            label: 'LinUCB',      meta: 'α=1.0 · contextual',     color: '#D85A30' },
+  { id: 'linucb',            label: 'LinUCB',      meta: '\u03b1=1.0 \u00b7 contextual',     color: '#D85A30' },
 ]
 
 const SIMULATE = import.meta.env.VITE_SIMULATE === 'true'
 
 // ── Policy panel (one per tab) ────────────────────────────────────────────────
 
-function PolicyPanel({ policy }) {
-  const { state, status, error, pull, reset, estimatedValues, pullCounts, isSimulating } = useBandit(policy.id)
+function PolicyPanel({ policy, armConfig, driftFn, labels }) {
+  const { state, status, error, pull, reset, estimatedValues, pullCounts, betaParams, isSimulating } = useBandit(policy.id, armConfig, driftFn)
   const [autoOn, setAutoOn] = useState(false)
   const [speed, setSpeed] = useState(5)
+  const [threshold, setThreshold] = useState(0.95)
   const intervalRef = useRef(null)
 
   const stopAuto = useCallback(() => {
@@ -49,6 +55,9 @@ function PolicyPanel({ policy }) {
   useEffect(() => () => stopAuto(), []) // cleanup on unmount
 
   const handleReset = async () => { stopAuto(); await reset() }
+
+  // Compute effective probabilities for display when drift is active
+  const effectiveP = driftFn ? driftFn(armConfig.trueP, state.pulls) : armConfig.trueP
 
   return (
     <div>
@@ -79,6 +88,7 @@ function PolicyPanel({ policy }) {
           onPull={arm => pull(arm)}
           color={policy.color}
           loading={status === 'loading'}
+          labels={labels}
         />
       </div>
 
@@ -95,7 +105,7 @@ function PolicyPanel({ policy }) {
             cursor: 'pointer',
           }}
         >
-          {autoOn ? '⏸ Running' : '▶ Auto-run'}
+          {autoOn ? '\u23f8 Running' : '\u25b6 Auto-run'}
         </button>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--color-text-secondary)', fontFamily: 'var(--font-mono)' }}>
@@ -106,23 +116,44 @@ function PolicyPanel({ policy }) {
         </div>
 
         <button onClick={handleReset} style={{ fontFamily: 'var(--font-mono)', fontSize: 11, padding: '5px 12px', borderRadius: 'var(--border-radius-md)', border: '0.5px solid var(--color-border-secondary)', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-secondary)' }}>
-          ⟳ Reset
+          {'\u27f3'} Reset
         </button>
 
         {isSimulating && (
           <span style={{ fontSize: 10, color: 'var(--color-text-secondary)', fontFamily: 'var(--font-mono)', marginLeft: 'auto' }}>
-            ● simulation mode
+            {'\u25cf'} simulation mode
+          </span>
+        )}
+        {driftFn && (
+          <span style={{ fontSize: 10, color: '#D85A30', fontFamily: 'var(--font-mono)' }}>
+            drift active
           </span>
         )}
         {error && (
           <span style={{ fontSize: 10, color: 'var(--color-text-danger)', fontFamily: 'var(--font-mono)' }}>
-            ⚠ {error}
+            {'\u26a0'} {error}
           </span>
         )}
       </div>
 
       {/* Charts */}
-      <Charts state={state} values={estimatedValues} counts={pullCounts} color={policy.color} />
+      <Charts state={state} values={estimatedValues} counts={pullCounts} color={policy.color} labels={labels} />
+
+      {/* Posterior distributions */}
+      <div style={{ marginTop: 16 }}>
+        <PosteriorChart betaParams={betaParams} labels={labels} />
+      </div>
+
+      {/* Convergence indicator */}
+      <div style={{ marginTop: 16 }}>
+        <ConvergencePanel
+          betaParams={betaParams}
+          pulls={state.pulls}
+          labels={labels}
+          threshold={threshold}
+          onThresholdChange={setThreshold}
+        />
+      </div>
     </div>
   )
 }
@@ -130,8 +161,17 @@ function PolicyPanel({ policy }) {
 // ── Root App ──────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [activePolicy, setActivePolicy] = useState(POLICIES[0].id)
-  const active = POLICIES.find(p => p.id === activePolicy)
+  const [activeTab, setActiveTab] = useState(POLICIES[0].id)
+  const [trueP, setTrueP] = useState(sim.DEFAULT_TRUE_P)
+  const [labels, setLabels] = useState(null)
+  const [scenarioId, setScenarioId] = useState('custom')
+  const [driftId, setDriftId] = useState('none')
+
+  const armConfig = useMemo(() => sim.makeArmConfig(trueP), [trueP])
+  const driftPattern = DRIFT_PATTERNS.find(d => d.id === driftId)
+  const driftFn = driftPattern?.fn || null
+
+  const allTabs = [...POLICIES.map(p => ({ ...p, type: 'policy' })), { id: 'race', label: 'Race', meta: 'all policies', color: '#8b949e', type: 'race' }]
 
   return (
     <div style={{ fontFamily: 'var(--font-mono)', maxWidth: 860, margin: '0 auto', padding: '1.5rem 1rem' }}>
@@ -151,31 +191,47 @@ export default function App() {
           rel="noreferrer"
           style={{ fontSize: 11, color: 'var(--color-text-secondary)', fontFamily: 'var(--font-mono)', textDecoration: 'none', border: '0.5px solid var(--color-border-secondary)', padding: '4px 10px', borderRadius: 'var(--border-radius-md)' }}
         >
-          MLflow UI ↗
+          MLflow UI {'\u2197'}
         </a>
       </div>
 
+      {/* Arm configurator */}
+      <ArmConfigurator
+        trueP={trueP}
+        setTrueP={setTrueP}
+        labels={labels}
+        setLabels={setLabels}
+        scenarioId={scenarioId}
+        setScenarioId={setScenarioId}
+        driftId={driftId}
+        setDriftId={setDriftId}
+        disabled={!SIMULATE}
+      />
+
       {/* True probabilities info bar */}
       <div style={{ background: 'var(--color-background-secondary)', borderRadius: 'var(--border-radius-md)', padding: '8px 12px', marginBottom: 16, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 10, color: 'var(--color-text-secondary)' }}>true Bernoulli p(reward):</span>
-        {sim.TRUE_P.map((p, i) => (
-          <span key={i} style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: p === sim.OPTIMAL ? '#1D9E75' : 'var(--color-text-secondary)' }}>
-            Arm {String.fromCharCode(65 + i)}: <strong>{p}</strong>{p === sim.OPTIMAL ? ' ★' : ''}
-          </span>
-        ))}
+        <span style={{ fontSize: 10, color: 'var(--color-text-secondary)' }}>true p(reward):</span>
+        {armConfig.trueP.map((p, i) => {
+          const label = labels && labels[i] ? labels[i] : `Arm ${String.fromCharCode(65 + i)}`
+          return (
+            <span key={i} style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: p === armConfig.optimal ? '#1D9E75' : 'var(--color-text-secondary)' }}>
+              {label}: <strong>{p.toFixed(2)}</strong>{p === armConfig.optimal ? ' \u2605' : ''}
+            </span>
+          )
+        })}
       </div>
 
-      {/* Policy tabs */}
+      {/* Tabs */}
       <div style={{ borderBottom: '0.5px solid var(--color-border-tertiary)', display: 'flex', marginBottom: 16, gap: 0 }}>
-        {POLICIES.map(p => (
+        {allTabs.map(p => (
           <button
             key={p.id}
-            onClick={() => setActivePolicy(p.id)}
+            onClick={() => setActiveTab(p.id)}
             style={{
               fontFamily: 'var(--font-sans)', fontSize: 12, fontWeight: 600,
               padding: '8px 14px', border: 'none', background: 'none', cursor: 'pointer',
-              color: activePolicy === p.id ? p.color : 'var(--color-text-secondary)',
-              borderBottom: `2px solid ${activePolicy === p.id ? p.color : 'transparent'}`,
+              color: activeTab === p.id ? p.color : 'var(--color-text-secondary)',
+              borderBottom: `2px solid ${activeTab === p.id ? p.color : 'transparent'}`,
               marginBottom: -1, whiteSpace: 'nowrap', transition: 'all .12s',
             }}
           >
@@ -185,12 +241,17 @@ export default function App() {
         ))}
       </div>
 
-      {/* Active policy panel — all are mounted to preserve state, only active is shown */}
+      {/* Policy panels — all mounted to preserve state, only active is shown */}
       {POLICIES.map(p => (
-        <div key={p.id} style={{ display: p.id === activePolicy ? 'block' : 'none' }}>
-          <PolicyPanel policy={p} />
+        <div key={p.id} style={{ display: p.id === activeTab ? 'block' : 'none' }}>
+          <PolicyPanel policy={p} armConfig={armConfig} driftFn={driftFn} labels={labels} />
         </div>
       ))}
+
+      {/* Race view */}
+      <div style={{ display: activeTab === 'race' ? 'block' : 'none' }}>
+        <PolicyRace armConfig={armConfig} driftFn={driftFn} />
+      </div>
     </div>
   )
 }

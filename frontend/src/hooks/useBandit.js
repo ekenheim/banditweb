@@ -12,27 +12,36 @@
  *   - Runs the JS simulation entirely in the browser
  *   - Identical UI, no cluster required
  */
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import * as api from '../lib/api'
 import * as sim from '../lib/simulation'
 
 const SIMULATE = import.meta.env.VITE_SIMULATE === 'true'
 
-export function useBandit(policy) {
-  const [state, setState] = useState(() => sim.makeState(policy))
+export function useBandit(policy, armConfig = sim.DEFAULT_CONFIG, driftFn = null) {
+  const [state, setState] = useState(() => sim.makeState(policy, armConfig))
   const [status, setStatus] = useState('idle')  // 'idle' | 'loading' | 'error'
   const [error, setError] = useState(null)
   const lastContext = useRef(null)
+  const prevNArms = useRef(armConfig.nArms)
+
+  // Auto-reset when arm count changes
+  useEffect(() => {
+    if (armConfig.nArms !== prevNArms.current) {
+      setState(sim.makeState(policy, armConfig))
+      setStatus('idle')
+      setError(null)
+      prevNArms.current = armConfig.nArms
+    }
+  }, [armConfig.nArms, policy, armConfig])
 
   const makeContext = useCallback(() => {
     if (policy !== 'linucb') return null
-    // Simulate 4-dim context: [time_bucket, user_segment, recency, frequency]
-    // In production the frontend would derive these from real user signals
     return [
-      Math.round((new Date().getHours() / 23) * 10) / 10,  // time of day
-      Math.round(Math.random() * 10) / 10,                  // simulated segment
-      Math.round(Math.random() * 10) / 10,                  // recency
-      Math.round(Math.random() * 10) / 10,                  // frequency
+      Math.round((new Date().getHours() / 23) * 10) / 10,
+      Math.round(Math.random() * 10) / 10,
+      Math.round(Math.random() * 10) / 10,
+      Math.round(Math.random() * 10) / 10,
     ]
   }, [policy])
 
@@ -46,11 +55,10 @@ export function useBandit(policy) {
       if (SIMULATE) {
         const ctx = makeContext()
         lastContext.current = ctx
-        arm = forceArm ?? sim.selectArm(state, ctx)
-        reward = sim.drawReward(arm)
-        setState(prev => sim.updateState(prev, arm, reward))
+        arm = forceArm ?? sim.selectArm(state, ctx, armConfig)
+        reward = sim.drawReward(arm, armConfig, state.pulls, driftFn)
+        setState(prev => sim.updateState(prev, arm, reward, armConfig, driftFn))
       } else {
-        // 1. Select arm from Seldon
         const ctx = makeContext()
         lastContext.current = ctx
         if (forceArm !== null) {
@@ -59,15 +67,9 @@ export function useBandit(policy) {
           const selection = await api.selectArm(policy, ctx)
           arm = selection.arm
         }
-
-        // 2. Simulate reward (Bernoulli draw based on hidden true probabilities)
-        reward = sim.drawReward(arm)
-
-        // 3. Submit reward to Seldon (updates model state + logs to MLflow)
+        reward = sim.drawReward(arm, armConfig, state.pulls, driftFn)
         await api.submitReward(policy, arm, reward)
-
-        // 4. Mirror state locally for chart rendering
-        setState(prev => sim.updateState(prev, arm, reward))
+        setState(prev => sim.updateState(prev, arm, reward, armConfig, driftFn))
       }
 
       setStatus('idle')
@@ -78,16 +80,16 @@ export function useBandit(policy) {
       console.error(`[${policy}] pull error:`, err)
       return null
     }
-  }, [policy, state, makeContext])
+  }, [policy, state, makeContext, armConfig, driftFn])
 
   const reset = useCallback(async () => {
-    setState(sim.makeState(policy))
+    setState(sim.makeState(policy, armConfig))
     setStatus('idle')
     setError(null)
     if (!SIMULATE) {
       try { await api.resetPolicy(policy) } catch (e) { console.warn('reset failed', e) }
     }
-  }, [policy])
+  }, [policy, armConfig])
 
   return {
     state,
@@ -97,6 +99,7 @@ export function useBandit(policy) {
     reset,
     estimatedValues: sim.getEstimatedValues(state),
     pullCounts: sim.getPullCounts(state),
+    betaParams: sim.getBetaParams(state),
     isSimulating: SIMULATE,
   }
 }

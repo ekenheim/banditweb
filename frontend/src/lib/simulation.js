@@ -8,22 +8,32 @@
  */
 
 const RAW = import.meta.env.VITE_ARM_PROBS
-export const TRUE_P = RAW
+export const DEFAULT_TRUE_P = RAW
   ? RAW.split(',').map(Number)
   : [0.55, 0.35, 0.7, 0.25, 0.45]
 
-export const N_ARMS = TRUE_P.length
-export const OPTIMAL = Math.max(...TRUE_P)
+// Backward-compat aliases
+export const TRUE_P = DEFAULT_TRUE_P
+export const N_ARMS = DEFAULT_TRUE_P.length
+export const OPTIMAL = Math.max(...DEFAULT_TRUE_P)
+
+// ── Arm config helper ────────────────────────────────────────────────────────
+
+export function makeArmConfig(trueP) {
+  return { trueP, nArms: trueP.length, optimal: Math.max(...trueP) }
+}
+
+export const DEFAULT_CONFIG = makeArmConfig(DEFAULT_TRUE_P)
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function betaSample(alpha, beta) {
+export function betaSample(alpha, beta) {
   const x = gammaSample(alpha)
   const y = gammaSample(beta)
   return x / (x + y + 1e-10)
 }
 
-function gammaSample(shape) {
+export function gammaSample(shape) {
   if (shape < 1) return gammaSample(1 + shape) * Math.pow(Math.random(), 1 / shape)
   const d = shape - 1 / 3
   const c = 1 / Math.sqrt(9 * d)
@@ -75,23 +85,24 @@ function inv(M) {
 
 // ── Initial states ────────────────────────────────────────────────────────────
 
-export function makeState(policy) {
+export function makeState(policy, armConfig = DEFAULT_CONFIG) {
+  const n = armConfig.nArms
   const base = { policy, pulls: 0, cumR: 0, cumReg: 0, hist: [], lastArm: null }
   switch (policy) {
     case 'epsilon-greedy':
-      return { ...base, counts: new Array(N_ARMS).fill(0), values: new Array(N_ARMS).fill(0) }
+      return { ...base, counts: new Array(n).fill(0), values: new Array(n).fill(0) }
     case 'ucb':
-      return { ...base, counts: new Array(N_ARMS).fill(0), values: new Array(N_ARMS).fill(0), total: 0 }
+      return { ...base, counts: new Array(n).fill(0), values: new Array(n).fill(0), total: 0 }
     case 'thompson-sampling':
-      return { ...base, alpha: new Array(N_ARMS).fill(1), beta: new Array(N_ARMS).fill(1) }
+      return { ...base, alpha: new Array(n).fill(1), beta: new Array(n).fill(1) }
     case 'linucb': {
       const d = 4
       return {
         ...base,
         d,
         alpha: 1.0,
-        A: Array.from({ length: N_ARMS }, () => eye(d)),
-        b: Array.from({ length: N_ARMS }, () => new Array(d).fill(0)),
+        A: Array.from({ length: n }, () => eye(d)),
+        b: Array.from({ length: n }, () => new Array(d).fill(0)),
         lastCtx: null,
       }
     }
@@ -102,10 +113,10 @@ export function makeState(policy) {
 
 // ── Arm selection ─────────────────────────────────────────────────────────────
 
-export function selectArm(state, context = null) {
+export function selectArm(state, context = null, armConfig = DEFAULT_CONFIG) {
   switch (state.policy) {
     case 'epsilon-greedy': {
-      if (Math.random() < 0.1) return Math.floor(Math.random() * N_ARMS)
+      if (Math.random() < 0.1) return Math.floor(Math.random() * armConfig.nArms)
       return state.values.indexOf(Math.max(...state.values))
     }
     case 'ucb': {
@@ -135,14 +146,17 @@ export function selectArm(state, context = null) {
 
 // ── State update after reward ─────────────────────────────────────────────────
 
-export function updateState(state, arm, reward) {
+export function updateState(state, arm, reward, armConfig = DEFAULT_CONFIG, driftFn = null) {
   const next = structuredClone(state)
+  const effectiveP = driftFn ? driftFn(armConfig.trueP, state.pulls) : armConfig.trueP
+  const effectiveOptimal = driftFn ? Math.max(...effectiveP) : armConfig.optimal
+  const meanP = effectiveP.reduce((a, b) => a + b, 0) / effectiveP.length
   next.pulls += 1
   next.cumR += reward
-  next.cumReg += OPTIMAL - TRUE_P[arm]
+  next.cumReg += effectiveOptimal - effectiveP[arm]
   next.lastArm = arm
   const trimAt = 200
-  next.hist = [...state.hist, { t: next.pulls, cumR: next.cumR, cumReg: next.cumReg }].slice(-trimAt)
+  next.hist = [...state.hist, { t: next.pulls, cumR: next.cumR, cumReg: next.cumReg, cumRandom: next.pulls * meanP }].slice(-trimAt)
 
   switch (state.policy) {
     case 'epsilon-greedy':
@@ -192,12 +206,32 @@ export function getPullCounts(state) {
     case 'thompson-sampling':
       return state.alpha.map((a, i) => Math.max(0, Math.round(a + state.beta[i] - 2)))
     case 'linucb':
-      return new Array(N_ARMS).fill(0)  // LinUCB doesn't track counts directly
+      return new Array(state.A.length).fill(0)  // LinUCB doesn't track counts directly
   }
 }
 
 // ── Simulate a Bernoulli reward draw ─────────────────────────────────────────
 
-export function drawReward(arm) {
-  return Math.random() < TRUE_P[arm] ? 1 : 0
+export function drawReward(arm, armConfig = DEFAULT_CONFIG, step = 0, driftFn = null) {
+  const effectiveP = driftFn ? driftFn(armConfig.trueP, step) : armConfig.trueP
+  return Math.random() < effectiveP[arm] ? 1 : 0
+}
+
+// ── Beta posterior params for any policy ─────────────────────────────────────
+
+export function getBetaParams(state) {
+  switch (state.policy) {
+    case 'thompson-sampling':
+      return state.alpha.map((a, i) => ({ alpha: a, beta: state.beta[i] }))
+    case 'epsilon-greedy':
+    case 'ucb':
+      return state.counts.map((n, i) => {
+        const s = Math.max(0, Math.round(n * state.values[i]))
+        return { alpha: s + 1, beta: (n - s) + 1 }
+      })
+    case 'linucb':
+      return state.A.map(() => ({ alpha: 1, beta: 1 }))
+    default:
+      return []
+  }
 }
