@@ -25,14 +25,13 @@ COPY _base/          ./bandit_runtime/
 COPY ${POLICY}/model.py ./bandit_runtime/${POLICY}.py
 COPY _base/__init__.py  ./bandit_runtime/__init__.py 2>/dev/null || true
 
-# MLServer model settings — tells MLServer which class to load
-COPY ${POLICY}/model-settings.json /app/model-settings.json
-
-# MLServer picks up settings from this env var
-ENV MLSERVER_MODEL_IMPLEMENTATION="bandit_runtime.${POLICY}.$(python3 -c \
+# MLServer picks up settings from this env var — detect class name at build time
+RUN CLASS_NAME=$(python3 -c \
   "import importlib, inspect; m=importlib.import_module('bandit_runtime.${POLICY}'); \
-   print([n for n,c in inspect.getmembers(m, inspect.isclass) if n != 'BanditBase'][0])")"
+   print([n for n,c in inspect.getmembers(m, inspect.isclass) if n != 'BanditBase'][0])") \
+  && echo "Detected class: ${CLASS_NAME}" \
+  && printf 'MLSERVER_MODEL_IMPLEMENTATION=bandit_runtime.%s.%s\n' "${POLICY}" "${CLASS_NAME}" >> /app/.env
 
 EXPOSE 8080 8081
 
-CMD ["mlserver", "start", "/app"]
+CMD ["sh", "-c", ". /app/.env && exec mlserver start /app"]
