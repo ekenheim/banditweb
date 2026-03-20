@@ -1,0 +1,151 @@
+---
+# .github/workflows/build-bandit-models.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Builds and pushes all four bandit model Docker images to Harbor on:
+#   - push to main (changes under models/)
+#   - pull_request targeting main (build only, no push)
+#   - manual dispatch (workflow_dispatch)
+#
+# Secrets required (set in repo Settings → Secrets):
+#   HARBOR_REGISTRY   — e.g. harbor.yourdomain.com
+#   HARBOR_USERNAME   — robot account with push rights
+#   HARBOR_PASSWORD   — robot account secret
+# ─────────────────────────────────────────────────────────────────────────────
+name: Build Bandit Model Images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "models/**"
+      - ".github/workflows/build-bandit-models.yaml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "models/**"
+  workflow_dispatch:
+    inputs:
+      policy:
+        description: "Single policy to build (leave empty for all)"
+        required: false
+        default: ""
+      push:
+        description: "Push to Harbor?"
+        type: boolean
+        default: true
+
+env:
+  REGISTRY: ${{ secrets.HARBOR_REGISTRY }}
+  PROJECT: development/bandit-models
+
+jobs:
+  # ── Determine which policies changed ───────────────────────────────────────
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      policies: ${{ steps.filter.outputs.policies }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine changed policies
+        id: filter
+        run: |
+          if [ -n "${{ github.event.inputs.policy }}" ]; then
+            # Manual dispatch with specific policy
+            echo "policies=[\"${{ github.event.inputs.policy }}\"]" >> "$GITHUB_OUTPUT"
+          else
+            # Detect changed policy directories
+            CHANGED=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} \
+              | grep '^models/' \
+              | cut -d/ -f2 \
+              | grep -v '^_' \
+              | grep -v '^requirements' \
+              | grep -v '^Dockerfile' \
+              | sort -u \
+              | jq -R . | jq -sc .)
+
+            if [ "$CHANGED" = "[]" ] || [ -z "$CHANGED" ]; then
+              # Fallback: build all on non-path-specific pushes
+              echo 'policies=["epsilon_greedy","ucb","thompson_sampling","linucb"]' >> "$GITHUB_OUTPUT"
+            else
+              echo "policies=$CHANGED" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+  # ── Build & push ───────────────────────────────────────────────────────────
+  build:
+    needs: changes
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        policy: ${{ fromJson(needs.changes.outputs.policies) }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:latest
+            network=host
+
+      - name: Log in to Harbor
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.HARBOR_USERNAME }}
+          password: ${{ secrets.HARBOR_PASSWORD }}
+
+      # Derive image tag: policy name with underscores → hyphens
+      - name: Compute image name
+        id: image
+        run: |
+          SLUG=$(echo "${{ matrix.policy }}" | tr '_' '-')
+          echo "slug=$SLUG" >> "$GITHUB_OUTPUT"
+          echo "tag=${{ env.REGISTRY }}/${{ env.PROJECT }}/${SLUG}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          echo "latest=${{ env.REGISTRY }}/${{ env.PROJECT }}/${SLUG}:latest" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: ./models
+          file: ./models/Dockerfile
+          build-args: |
+            POLICY=${{ matrix.policy }}
+          tags: |
+            ${{ steps.image.outputs.tag }}
+            ${{ steps.image.outputs.latest }}
+          push: ${{ github.event_name != 'pull_request' }}
+          cache-from: type=gha,scope=${{ matrix.policy }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.policy }}
+          platforms: linux/amd64   # Talos workers are amd64
+
+      - name: Output image digest
+        run: |
+          echo "### Image built" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Policy:** \`${{ matrix.policy }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Tag:** \`${{ steps.image.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  # ── Trigger Flux reconciliation ────────────────────────────────────────────
+  flux-reconcile:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Reconcile Flux kustomization
+        uses: fluxcd/flux2/action@main
+        with:
+          version: latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Flux watches the kubernetes/ dir automatically via GitRepository,
+      # so an explicit reconcile is optional — this just forces it immediately.
+      - run: |
+          flux reconcile kustomization bandit-demo \
+            --with-source \
+            --timeout=5m \
+            --namespace=flux-system \
+          || echo "flux CLI not configured — Flux will auto-reconcile within poll interval"
