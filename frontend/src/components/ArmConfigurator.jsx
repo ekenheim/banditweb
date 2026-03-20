@@ -5,7 +5,7 @@
 import React, { useState } from 'react'
 import { SCENARIOS, DRIFT_PATTERNS } from '../lib/scenarios'
 
-export default function ArmConfigurator({ trueP, setTrueP, labels, setLabels, scenarioId, setScenarioId, driftId, setDriftId, disabled }) {
+export default function ArmConfigurator({ trueP, setTrueP, labels, setLabels, scenarioId, setScenarioId, driftId, setDriftId }) {
   const [open, setOpen] = useState(false)
   const nArms = trueP.length
   const bestIdx = trueP.indexOf(Math.max(...trueP))
@@ -40,14 +40,6 @@ export default function ArmConfigurator({ trueP, setTrueP, labels, setLabels, sc
   }
 
   const activeDrift = DRIFT_PATTERNS.find(d => d.id === driftId)
-
-  if (disabled) {
-    return (
-      <div style={{ background: 'var(--color-background-secondary)', borderRadius: 'var(--border-radius-md)', padding: '8px 12px', marginBottom: 12, fontSize: 10, color: 'var(--color-text-secondary)', fontFamily: 'var(--font-mono)' }}>
-        arm configuration is only available in simulation mode
-      </div>
-    )
-  }
 
   return (
     <div style={{ background: 'var(--color-background-secondary)', borderRadius: 'var(--border-radius-md)', marginBottom: 12, overflow: 'hidden' }}>

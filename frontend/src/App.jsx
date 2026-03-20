@@ -205,7 +205,6 @@ export default function App() {
         setScenarioId={setScenarioId}
         driftId={driftId}
         setDriftId={setDriftId}
-        disabled={!SIMULATE}
       />
 
       {/* True probabilities info bar */}

@@ -2,7 +2,7 @@
  * components/ConvergencePanel.jsx
  * Shows P(best arm) per arm, expected loss, and a "Test Complete" badge.
  */
-import React, { useMemo, useRef } from 'react'
+import React, { useRef } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, ReferenceLine,
 } from 'recharts'
@@ -16,14 +16,17 @@ const ARM_COLORS = [
 const TICK_STYLE = { fontSize: 10, fontFamily: 'var(--font-mono)', fill: 'var(--color-text-secondary)' }
 
 export default function ConvergencePanel({ betaParams, pulls, labels, threshold = 0.95, onThresholdChange }) {
-  const cacheRef = useRef({ key: '', pBest: [], loss: [] })
+  // Recompute every 10 pulls using a ref to hold the last result
+  const lastComputed = useRef({ at: -1, pBest: [], loss: [] })
+  const bucket = Math.floor(pulls / 10)
 
-  // Recompute every 10 pulls
-  const cacheKey = `${Math.floor(pulls / 10)}-${betaParams.map(p => `${p.alpha}:${p.beta}`).join(',')}`
-  const { pBest, loss } = useMemo(() => {
-    if (pulls < 1) return { pBest: betaParams.map(() => 1 / betaParams.length), loss: betaParams.map(() => 0) }
-    return { pBest: computePBest(betaParams), loss: computeExpectedLoss(betaParams) }
-  }, [cacheKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  if (pulls < 1) {
+    lastComputed.current = { at: -1, pBest: betaParams.map(() => 1 / betaParams.length), loss: betaParams.map(() => 0) }
+  } else if (bucket !== lastComputed.current.at) {
+    lastComputed.current = { at: bucket, pBest: computePBest(betaParams), loss: computeExpectedLoss(betaParams) }
+  }
+
+  const { pBest, loss } = lastComputed.current
 
   const leaderIdx = pBest.indexOf(Math.max(...pBest))
   const converged = pBest[leaderIdx] >= threshold

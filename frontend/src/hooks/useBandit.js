@@ -52,7 +52,11 @@ export function useBandit(policy, armConfig = sim.DEFAULT_CONFIG, driftFn = null
     try {
       let arm, reward
 
-      if (SIMULATE) {
+      // Use simulation when explicitly set, when arm config differs from backend default,
+      // or when drift is active (backend doesn't support drift)
+      const useLocalSim = SIMULATE || armConfig.nArms !== sim.DEFAULT_CONFIG.nArms || driftFn !== null
+
+      if (useLocalSim) {
         const ctx = makeContext()
         lastContext.current = ctx
         arm = forceArm ?? sim.selectArm(state, ctx, armConfig)
@@ -100,6 +104,6 @@ export function useBandit(policy, armConfig = sim.DEFAULT_CONFIG, driftFn = null
     estimatedValues: sim.getEstimatedValues(state),
     pullCounts: sim.getPullCounts(state),
     betaParams: sim.getBetaParams(state),
-    isSimulating: SIMULATE,
+    isSimulating: SIMULATE || armConfig.nArms !== sim.DEFAULT_CONFIG.nArms || driftFn !== null,
   }
 }
