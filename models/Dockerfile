@@ -24,13 +24,17 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY _base/          ./bandit_runtime/
 COPY ${POLICY}/model.py ./bandit_runtime/${POLICY}.py
 
-# MLServer picks up settings from this env var — detect class name at build time
-RUN CLASS_NAME=$(python3 -c \
-  "import importlib, inspect; m=importlib.import_module('bandit_runtime.${POLICY}'); \
-   print([n for n,c in inspect.getmembers(m, inspect.isclass) if n != 'BanditBase'][0])") \
-  && echo "Detected class: ${CLASS_NAME}" \
-  && printf 'MLSERVER_MODEL_IMPLEMENTATION=bandit_runtime.%s.%s\n' "${POLICY}" "${CLASS_NAME}" >> /app/.env
-
 EXPOSE 8080 8081
+
+# Map policy to class name
+ENV MLSERVER_MODEL_IMPLEMENTATION=""
+RUN case "${POLICY}" in \
+      epsilon_greedy)     CLASS=EpsilonGreedyModel ;; \
+      ucb)                CLASS=UCBModel ;; \
+      thompson_sampling)  CLASS=ThompsonSamplingModel ;; \
+      linucb)             CLASS=LinUCBModel ;; \
+      *) echo "Unknown policy: ${POLICY}" && exit 1 ;; \
+    esac \
+    && echo "MLSERVER_MODEL_IMPLEMENTATION=bandit_runtime.${POLICY}.${CLASS}" > /app/.env
 
 CMD ["sh", "-c", ". /app/.env && exec mlserver start /app"]
