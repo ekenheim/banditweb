@@ -34,6 +34,8 @@ function PolicyPanel({ policy, armConfig, driftFn, labels }) {
   const [speed, setSpeed] = useState(5)
   const [threshold, setThreshold] = useState(0.95)
   const intervalRef = useRef(null)
+  const pullRef = useRef(pull)
+  pullRef.current = pull  // always points to the latest pull function
 
   const stopAuto = useCallback(() => {
     if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null }
@@ -41,9 +43,9 @@ function PolicyPanel({ policy, armConfig, driftFn, labels }) {
   }, [])
 
   const startAuto = useCallback(() => {
-    intervalRef.current = setInterval(() => pull(), Math.round(1000 / speed))
+    intervalRef.current = setInterval(() => pullRef.current(), Math.round(1000 / speed))
     setAutoOn(true)
-  }, [pull, speed])
+  }, [speed])
 
   const toggleAuto = () => autoOn ? stopAuto() : startAuto()
 

@@ -32,15 +32,18 @@ export default function PolicyRace({ armConfig, driftFn }) {
     await Promise.all(hooks.map(h => h.pull()))
   }, [eg.pull, ucb.pull, ts.pull, lin.pull]) // eslint-disable-line
 
+  const pullAllRef = useRef(pullAll)
+  pullAllRef.current = pullAll
+
   const stopAuto = useCallback(() => {
     if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null }
     setAutoOn(false)
   }, [])
 
   const startAuto = useCallback(() => {
-    intervalRef.current = setInterval(() => pullAll(), Math.round(1000 / speed))
+    intervalRef.current = setInterval(() => pullAllRef.current(), Math.round(1000 / speed))
     setAutoOn(true)
-  }, [pullAll, speed])
+  }, [speed])
 
   const toggleAuto = () => autoOn ? stopAuto() : startAuto()
 
