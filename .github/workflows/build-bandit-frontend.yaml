@@ -34,7 +34,7 @@ jobs:
 
       - name: Build image
         run: |
-          docker build \
+          docker build --network=host \
             --build-arg VITE_MLFLOW_URL=${{ secrets.MLFLOW_URL }} \
             --build-arg VITE_SIMULATE=false \
             -t ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }} \

@@ -103,7 +103,7 @@ jobs:
 
       - name: Build image
         run: |
-          docker build \
+          docker build --network=host \
             --build-arg POLICY=${{ matrix.policy }} \
             -t ${{ steps.image.outputs.tag }} \
             -t ${{ steps.image.outputs.latest }} \
