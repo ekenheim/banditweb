@@ -36,7 +36,7 @@ on:
 
 env:
   REGISTRY: ${{ secrets.HARBOR_REGISTRY }}
-  PROJECT: development/bandit-models
+  PROJECT: banditweb
 
 jobs:
   # ── Determine which policies changed ───────────────────────────────────────
