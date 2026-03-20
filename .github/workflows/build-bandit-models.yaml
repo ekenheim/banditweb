@@ -41,7 +41,7 @@ env:
 jobs:
   # ── Determine which policies changed ───────────────────────────────────────
   changes:
-    runs-on: ubuntu-latest
+    runs-on: gha-runner-scale-set-banditweb
     outputs:
       policies: ${{ steps.filter.outputs.policies }}
     steps:
@@ -75,7 +75,7 @@ jobs:
   # ── Build & push ───────────────────────────────────────────────────────────
   build:
     needs: changes
-    runs-on: ubuntu-latest
+    runs-on: gha-runner-scale-set-banditweb
     strategy:
       fail-fast: false
       matrix:
@@ -132,7 +132,7 @@ jobs:
   # ── Trigger Flux reconciliation ────────────────────────────────────────────
   flux-reconcile:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: gha-runner-scale-set-banditweb
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     steps:
       - name: Reconcile Flux kustomization
