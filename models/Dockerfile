@@ -23,7 +23,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the shared base and the specific policy module
 COPY _base/          ./bandit_runtime/
 COPY ${POLICY}/model.py ./bandit_runtime/${POLICY}.py
-COPY _base/__init__.py  ./bandit_runtime/__init__.py 2>/dev/null || true
 
 # MLServer picks up settings from this env var — detect class name at build time
 RUN CLASS_NAME=$(python3 -c \
