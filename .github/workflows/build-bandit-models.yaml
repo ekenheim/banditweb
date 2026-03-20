@@ -98,9 +98,9 @@ jobs:
         run: |
           echo "Registry: ${{ env.REGISTRY }}"
           echo "Username length: ${#HARBOR_USER}"
-          nslookup ${{ env.REGISTRY }} || true
-          wget --timeout=5 -qO- https://${{ env.REGISTRY }}/v2/ 2>&1 || true
-          docker login ${{ env.REGISTRY }} -u "$HARBOR_USER" -p "$HARBOR_PASS" 2>&1 || true
+          cat /etc/resolv.conf
+          getent hosts ${{ env.REGISTRY }} || echo "getent failed"
+          echo "$HARBOR_PASS" | docker login ${{ env.REGISTRY }} -u "$HARBOR_USER" --password-stdin 2>&1 || true
         env:
           HARBOR_USER: ${{ secrets.HARBOR_USERNAME }}
           HARBOR_PASS: ${{ secrets.HARBOR_PASSWORD }}
