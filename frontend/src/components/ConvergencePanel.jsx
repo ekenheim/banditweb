@@ -2,7 +2,7 @@
  * components/ConvergencePanel.jsx
  * Shows P(best arm) per arm, expected loss, and a "Test Complete" badge.
  */
-import React, { useRef } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, ReferenceLine,
 } from 'recharts'
@@ -16,17 +16,23 @@ const ARM_COLORS = [
 const TICK_STYLE = { fontSize: 10, fontFamily: 'var(--font-mono)', fill: 'var(--color-text-secondary)' }
 
 export default function ConvergencePanel({ betaParams, pulls, labels, threshold = 0.95, onThresholdChange }) {
-  // Recompute every 10 pulls using a ref to hold the last result
-  const lastComputed = useRef({ at: -1, pBest: [], loss: [] })
-  const bucket = Math.floor(pulls / 10)
+  const nArms = betaParams.length
+  const [pBest, setPBest] = useState(() => new Array(nArms).fill(1 / nArms))
+  const [loss, setLoss] = useState(() => new Array(nArms).fill(0))
 
-  if (pulls < 1) {
-    lastComputed.current = { at: -1, pBest: betaParams.map(() => 1 / betaParams.length), loss: betaParams.map(() => 0) }
-  } else if (bucket !== lastComputed.current.at) {
-    lastComputed.current = { at: bucket, pBest: computePBest(betaParams), loss: computeExpectedLoss(betaParams) }
-  }
-
-  const { pBest, loss } = lastComputed.current
+  // Recompute every 10 pulls via useEffect — runs after render with correct betaParams
+  useEffect(() => {
+    if (pulls < 1) {
+      setPBest(new Array(nArms).fill(1 / nArms))
+      setLoss(new Array(nArms).fill(0))
+      return
+    }
+    // Throttle: only recompute on multiples of 10 (or first pull)
+    if (pulls === 1 || pulls % 10 === 0) {
+      setPBest(computePBest(betaParams))
+      setLoss(computeExpectedLoss(betaParams))
+    }
+  }, [pulls, nArms]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const leaderIdx = pBest.indexOf(Math.max(...pBest))
   const converged = pBest[leaderIdx] >= threshold
@@ -53,7 +59,7 @@ export default function ConvergencePanel({ betaParams, pulls, labels, threshold 
         )}
         {pulls > 0 && (
           <span style={{ fontSize: 9, color: 'var(--color-text-secondary)', fontFamily: 'var(--font-mono)', marginLeft: 'auto' }}>
-            leader loss: {loss[leaderIdx]?.toFixed(4) || '—'}
+            leader loss: {loss[leaderIdx]?.toFixed(4) || '\u2014'}
           </span>
         )}
       </div>

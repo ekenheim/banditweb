@@ -4,7 +4,8 @@
       "Bash(npm run:*)",
       "Bash(npx vite:*)",
       "Bash(npm install:*)",
-      "Bash(VITE_SIMULATE=true npx vite build 2>&1)"
+      "Bash(VITE_SIMULATE=true npx vite build 2>&1)",
+      "Bash(node:*)"
     ]
   }
 }
