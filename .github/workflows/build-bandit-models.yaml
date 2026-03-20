@@ -90,6 +90,9 @@ jobs:
           driver-opts: |
             image=moby/buildkit:latest
             network=host
+          buildkitd-config-inline: |
+            [dns]
+              nameservers=["10.43.0.10"]
 
       - name: Log in to Harbor
         if: github.event_name != 'pull_request'
