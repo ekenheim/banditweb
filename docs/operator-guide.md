@@ -10,7 +10,7 @@
 
 # 2. Create a MinIO bucket for artifacts
 mc alias set minio https://s3.${SECRET_DOMAIN} <access_key> <secret_key>
-mc mb minio/bandit-demo-artifacts
+mc mb minio/bandit-demo-artifacts 
 
 # 3. Push manifests to your GitOps repo under kubernetes/apps/datasci/bandit-demo/
 #    Flux will reconcile automatically.
