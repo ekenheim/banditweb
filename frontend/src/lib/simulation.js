@@ -132,6 +132,7 @@ export function makeState(policy, armConfig = DEFAULT_CONFIG) {
         d,
         alpha: 1.0,
         A: Array.from({ length: n }, () => eye(d)),
+        Ainv: Array.from({ length: n }, () => eye(d)),
         b: Array.from({ length: n }, () => new Array(d).fill(0)),
         counts: new Array(n).fill(0),
         rewards: new Array(n).fill(0),
@@ -149,6 +150,7 @@ export function makeState(policy, armConfig = DEFAULT_CONFIG) {
         d,
         v: 1.0,
         A: Array.from({ length: n }, () => eye(d)),
+        Ainv: Array.from({ length: n }, () => eye(d)),
         b: Array.from({ length: n }, () => new Array(d).fill(0)),
         counts: new Array(n).fill(0),
         rewards: new Array(n).fill(0),
@@ -181,8 +183,7 @@ export function selectArm(state, context = null, armConfig = DEFAULT_CONFIG) {
     case 'linucb': {
       const ctx = context || Array.from({ length: state.d }, () => Math.random())
       state.lastCtx = ctx
-      const scores = state.A.map((A, i) => {
-        const Ainv = inv(A)
+      const scores = state.Ainv.map((Ainv, i) => {
         const theta = matvec(Ainv, state.b[i])
         const exploit = ctx.reduce((s, c, j) => s + c * theta[j], 0)
         const explore = state.alpha * Math.sqrt(Math.max(0, vtMv(ctx, Ainv, ctx)))
@@ -216,10 +217,8 @@ export function selectArm(state, context = null, armConfig = DEFAULT_CONFIG) {
     case 'lints': {
       const ctx = context || Array.from({ length: state.d }, () => Math.random())
       state.lastCtx = ctx
-      const scores = state.A.map((A, i) => {
-        const Ainv = inv(A)
+      const scores = state.Ainv.map((Ainv, i) => {
         const thetaHat = matvec(Ainv, state.b[i])
-        // Scale covariance by v^2
         const cov = Ainv.map(row => row.map(v => v * state.v * state.v))
         const thetaSample = mvnSample(thetaHat, cov)
         return ctx.reduce((s, c, j) => s + c * thetaSample[j], 0)
@@ -257,6 +256,7 @@ export function updateState(state, arm, reward, armConfig = DEFAULT_CONFIG, drif
     case 'linucb': {
       const ctx = state.lastCtx || Array.from({ length: state.d }, () => 0.5)
       next.A[arm] = outerAdd(state.A[arm], ctx)
+      next.Ainv[arm] = inv(next.A[arm])
       next.b[arm] = state.b[arm].map((v, j) => v + reward * ctx[j])
       next.counts[arm] += 1
       next.rewards[arm] += reward
@@ -282,6 +282,7 @@ export function updateState(state, arm, reward, armConfig = DEFAULT_CONFIG, drif
     case 'lints': {
       const ctx = state.lastCtx || Array.from({ length: state.d }, () => 0.5)
       next.A[arm] = outerAdd(state.A[arm], ctx)
+      next.Ainv[arm] = inv(next.A[arm])
       next.b[arm] = state.b[arm].map((v, j) => v + reward * ctx[j])
       next.counts[arm] += 1
       next.rewards[arm] += reward
@@ -302,9 +303,9 @@ export function getEstimatedValues(state) {
       return state.alpha.map((a, i) => +(a / (a + state.beta[i])).toFixed(3))
     case 'linucb':
     case 'lints':
-      return state.A.map((A, i) => {
+      return state.Ainv.map((Ainv, i) => {
         try {
-          const theta = matvec(inv(A), state.b[i])
+          const theta = matvec(Ainv, state.b[i])
           return +(theta.reduce((s, v) => s + v, 0) / state.d).toFixed(3)
         } catch { return 0 }
       })

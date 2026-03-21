@@ -2,7 +2,7 @@
  * components/PolicyRace.jsx
  * Runs selected policies simultaneously on the same arm config, overlays cumulative reward.
  */
-import React, { useState, useRef, useCallback, useEffect, useImperativeHandle, forwardRef } from 'react'
+import React, { useState, useRef, useCallback, useEffect } from 'react'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
 } from 'recharts'
@@ -20,13 +20,27 @@ const RACE_POLICIES = [
 
 const TICK_STYLE = { fontSize: 10, fontFamily: 'var(--font-mono)', fill: 'var(--color-text-secondary)' }
 
-// ── Per-policy runner (owns its own useBandit hook) ────────────────────────
+// ── Per-policy runner — renders nothing but owns its useBandit hook ────────
+// Reports state changes to the parent via onStateChange callback.
 
-const RacePolicyRunner = forwardRef(function RacePolicyRunner({ policyId, armConfig, driftFn }, ref) {
+function RacePolicyRunner({ policyId, armConfig, driftFn, onStateChange }) {
   const bandit = useBandit(policyId, armConfig, driftFn)
-  useImperativeHandle(ref, () => bandit, [bandit])
-  return null // Headless — just holds state
-})
+  const pullRef = useRef(bandit.pull)
+  const resetRef = useRef(bandit.reset)
+  pullRef.current = bandit.pull
+  resetRef.current = bandit.reset
+
+  // Notify parent whenever state changes
+  useEffect(() => {
+    onStateChange(policyId, {
+      state: bandit.state,
+      pull: () => pullRef.current(),
+      reset: () => resetRef.current(),
+    })
+  }, [bandit.state]) // eslint-disable-line
+
+  return null
+}
 
 // ── Main component ────────────────────────────────────────────────────────
 
@@ -36,11 +50,14 @@ export default function PolicyRace({ armConfig, driftFn }) {
   const [speed, setSpeed] = useState(5)
   const intervalRef = useRef(null)
 
-  // Refs for all policy runners (always all 7 mounted)
-  const runnerRefs = useRef({})
-  RACE_POLICIES.forEach(p => {
-    if (!runnerRefs.current[p.id]) runnerRefs.current[p.id] = React.createRef()
-  })
+  // Store latest bandit data from each runner
+  const runnersRef = useRef({})
+  const [tick, setTick] = useState(0) // counter to force re-renders
+
+  const handleStateChange = useCallback((policyId, data) => {
+    runnersRef.current[policyId] = data
+    setTick(t => t + 1)
+  }, [])
 
   const togglePolicy = (id) => {
     setSelected(prev => {
@@ -51,12 +68,10 @@ export default function PolicyRace({ armConfig, driftFn }) {
     })
   }
 
-  const pullAll = useCallback(async () => {
-    const promises = RACE_POLICIES
+  const pullAll = useCallback(() => {
+    RACE_POLICIES
       .filter(p => selected.has(p.id))
-      .map(p => runnerRefs.current[p.id]?.current?.pull())
-      .filter(Boolean)
-    await Promise.all(promises)
+      .forEach(p => runnersRef.current[p.id]?.pull())
   }, [selected])
 
   const pullAllRef = useRef(pullAll)
@@ -80,45 +95,38 @@ export default function PolicyRace({ armConfig, driftFn }) {
 
   useEffect(() => () => stopAuto(), []) // eslint-disable-line
 
-  const handleReset = async () => {
+  const handleReset = () => {
     stopAuto()
-    await Promise.all(
-      RACE_POLICIES.map(p => runnerRefs.current[p.id]?.current?.reset()).filter(Boolean)
-    )
+    RACE_POLICIES.forEach(p => runnersRef.current[p.id]?.reset())
   }
 
-  // Collect state from all runners
-  const hooks = RACE_POLICIES.map(p => ({
-    policy: p,
-    bandit: runnerRefs.current[p.id]?.current,
-  }))
+  // Build chart data from runner states
+  const activeRunners = RACE_POLICIES
+    .filter(p => selected.has(p.id) && runnersRef.current[p.id])
+    .map(p => ({ policy: p, data: runnersRef.current[p.id] }))
 
-  const activeHooks = hooks.filter(h => selected.has(h.policy.id) && h.bandit)
-
-  // Merge histories for overlay chart
-  const maxLen = Math.max(0, ...activeHooks.map(h => h.bandit?.state?.hist?.length || 0))
+  const maxLen = Math.max(0, ...activeRunners.map(r => r.data?.state?.hist?.length || 0))
   const merged = []
   const step = Math.max(1, Math.floor(maxLen / 150))
   for (let i = 0; i < maxLen; i++) {
     if (i % step !== 0 && i !== maxLen - 1) continue
     const point = { t: i + 1 }
-    activeHooks.forEach(h => {
-      const entry = h.bandit?.state?.hist?.[i]
-      point[h.policy.id] = entry ? entry.cumR : null
+    activeRunners.forEach(r => {
+      const entry = r.data?.state?.hist?.[i]
+      point[r.policy.id] = entry ? entry.cumR : null
     })
-    const firstEntry = activeHooks[0]?.bandit?.state?.hist?.[i]
+    const firstEntry = activeRunners[0]?.data?.state?.hist?.[i]
     point.random = firstEntry ? firstEntry.cumRandom : null
     merged.push(point)
   }
 
-  // Summary table
-  const pulls = activeHooks[0]?.bandit?.state?.pulls || 0
-  const summary = activeHooks
-    .map(h => ({
-      ...h.policy,
-      pulls: h.bandit?.state?.pulls || 0,
-      cumR: h.bandit?.state?.cumR || 0,
-      cumReg: h.bandit?.state?.cumReg || 0,
+  const pulls = activeRunners[0]?.data?.state?.pulls || 0
+  const summary = activeRunners
+    .map(r => ({
+      ...r.policy,
+      pulls: r.data?.state?.pulls || 0,
+      cumR: r.data?.state?.cumR || 0,
+      cumReg: r.data?.state?.cumReg || 0,
     }))
     .sort((a, b) => b.cumR - a.cumR)
 
@@ -128,10 +136,10 @@ export default function PolicyRace({ armConfig, driftFn }) {
       {RACE_POLICIES.map(p => (
         <RacePolicyRunner
           key={p.id}
-          ref={runnerRefs.current[p.id]}
           policyId={p.id}
           armConfig={armConfig}
           driftFn={driftFn}
+          onStateChange={handleStateChange}
         />
       ))}
 
@@ -206,9 +214,9 @@ export default function PolicyRace({ armConfig, driftFn }) {
               formatter={v => [v !== null ? v.toFixed(2) : '\u2014']}
             />
             {RACE_POLICIES.filter(p => selected.has(p.id)).map(p => (
-              <Line key={p.id} type="monotone" dataKey={p.id} name={p.label} stroke={p.color} dot={false} strokeWidth={1.5} connectNulls />
+              <Line key={p.id} type="monotone" dataKey={p.id} name={p.label} stroke={p.color} dot={false} strokeWidth={1.5} connectNulls isAnimationActive={false} />
             ))}
-            <Line type="monotone" dataKey="random" name="Random" stroke="#8b949e" dot={false} strokeWidth={1} strokeDasharray="2 4" opacity={0.6} />
+            <Line type="monotone" dataKey="random" name="Random" stroke="#8b949e" dot={false} strokeWidth={1} strokeDasharray="2 4" opacity={0.6} isAnimationActive={false} />
             <Legend wrapperStyle={{ fontSize: 10, fontFamily: 'var(--font-mono)', paddingTop: 4 }} />
           </LineChart>
         </ResponsiveContainer>

@@ -64,23 +64,23 @@ class CompareRequest(BaseModel):
 def fig_to_base64(fig) -> str:
     """Convert a matplotlib figure to a base64-encoded PNG string."""
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=120, bbox_inches="tight", facecolor="#0d1117")
+    fig.savefig(buf, format="png", dpi=120, bbox_inches="tight", facecolor="#ffffff")
     plt.close(fig)
     buf.seek(0)
     return base64.b64encode(buf.read()).decode("utf-8")
 
 
-def _style_axes_dark(fig):
-    """Apply dark theme to all axes in a figure."""
+def _style_axes(fig):
+    """Apply clean white theme to all axes in a figure."""
     for ax in fig.get_axes():
-        ax.set_facecolor("#0d1117")
-        ax.tick_params(colors="#8b949e")
-        ax.xaxis.label.set_color("#8b949e")
-        ax.yaxis.label.set_color("#8b949e")
-        ax.title.set_color("#c9d1d9")
+        ax.set_facecolor("#ffffff")
+        ax.tick_params(colors="#333333")
+        ax.xaxis.label.set_color("#333333")
+        ax.yaxis.label.set_color("#333333")
+        ax.title.set_color("#111111")
         for spine in ax.spines.values():
-            spine.set_color("#30363d")
-    fig.patch.set_facecolor("#0d1117")
+            spine.set_color("#cccccc")
+    fig.patch.set_facecolor("#ffffff")
     fig.tight_layout()
 
 
@@ -88,7 +88,7 @@ def make_trace_plot(idata: az.InferenceData, var_names: list[str]) -> str:
     """Generate a trace plot and return as base64 PNG."""
     axes = az.plot_trace(idata, var_names=var_names)
     fig = axes.ravel()[0].get_figure()
-    _style_axes_dark(fig)
+    _style_axes(fig)
     return fig_to_base64(fig)
 
 
@@ -97,7 +97,7 @@ def make_posterior_plot(idata: az.InferenceData, var_names: list[str]) -> str:
     axes = az.plot_posterior(idata, var_names=var_names)
     axes_flat = axes.ravel() if hasattr(axes, 'ravel') else [axes]
     fig = axes_flat[0].get_figure()
-    _style_axes_dark(fig)
+    _style_axes(fig)
     return fig_to_base64(fig)
 
 
@@ -110,14 +110,14 @@ def make_ppc_plot(idata: az.InferenceData) -> str | None:
         axes = az.plot_ppc(idata)
         axes_flat = axes.ravel() if hasattr(axes, 'ravel') else [axes]
         fig = axes_flat[0].get_figure()
-        _style_axes_dark(fig)
+        _style_axes(fig)
         for ax in fig.get_axes():
             legend = ax.get_legend()
             if legend:
-                legend.get_frame().set_facecolor("#161b22")
-                legend.get_frame().set_edgecolor("#30363d")
+                legend.get_frame().set_facecolor("#ffffff")
+                legend.get_frame().set_edgecolor("#cccccc")
                 for text in legend.get_texts():
-                    text.set_color("#c9d1d9")
+                    text.set_color("#333333")
         return fig_to_base64(fig)
     except Exception:
         return None

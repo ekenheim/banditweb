@@ -40,7 +40,7 @@ const SIMULATE = import.meta.env.VITE_SIMULATE === 'true'
 
 // ── Policy panel (one per tab) ────────────────────────────────────────────────
 
-function PolicyPanel({ policy, armConfig, driftFn, labels }) {
+function PolicyPanel({ policy, armConfig, driftFn, labels, onPullsChange }) {
   const { state, status, error, pull, reset, estimatedValues, pullCounts, betaParams, isSimulating } = useBandit(policy.id, armConfig, driftFn)
   const [autoOn, setAutoOn] = useState(false)
   const [speed, setSpeed] = useState(5)
@@ -70,8 +70,10 @@ function PolicyPanel({ policy, armConfig, driftFn, labels }) {
 
   const handleReset = async () => { stopAuto(); await reset() }
 
-  // Compute effective probabilities for display when drift is active
-  const effectiveP = driftFn ? driftFn(armConfig.trueP, state.pulls) : armConfig.trueP
+  // Report pull count to parent for drift display
+  useEffect(() => {
+    if (onPullsChange) onPullsChange(state.pulls)
+  }, [state.pulls]) // eslint-disable-line
 
   return (
     <div>
@@ -195,6 +197,23 @@ export default function App() {
   const driftPattern = DRIFT_PATTERNS.find(d => d.id === driftId)
   const driftFn = driftPattern?.fn || null
 
+  // Track active policy's pull count for drift visualization
+  const [activePulls, setActivePulls] = useState(0)
+  const pullsRef = useRef({})  // per-policy pull counts
+  const handlePullsChange = useCallback((policyId) => (pulls) => {
+    pullsRef.current[policyId] = pulls
+    if (policyId === activeTab) setActivePulls(pulls)
+  }, [activeTab])
+
+  // Update displayed pulls when switching tabs
+  useEffect(() => {
+    setActivePulls(pullsRef.current[activeTab] || 0)
+  }, [activeTab])
+
+  // Effective probabilities after drift
+  const effectiveP = driftFn ? driftFn(trueP, activePulls) : trueP
+  const effectiveOptimal = Math.max(...effectiveP)
+
   return (
     <div style={{ fontFamily: 'var(--font-mono)', maxWidth: 1080, margin: '0 auto', padding: '1.5rem 1rem' }}>
       {/* Header */}
@@ -229,17 +248,25 @@ export default function App() {
         setDriftId={setDriftId}
       />
 
-      {/* True probabilities info bar */}
-      <div style={{ background: 'var(--color-background-secondary)', borderRadius: 'var(--border-radius-md)', padding: '8px 12px', marginBottom: 16, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 10, color: 'var(--color-text-secondary)' }}>true p(reward):</span>
-        {armConfig.trueP.map((p, i) => {
+      {/* True probabilities info bar — shows drifted values when drift is active */}
+      <div style={{ background: 'var(--color-background-secondary)', borderRadius: 'var(--border-radius-md)', padding: '8px 12px', marginBottom: 16, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={{ fontSize: 10, color: 'var(--color-text-secondary)' }}>
+          {driftFn ? 'effective p(reward):' : 'true p(reward):'}
+        </span>
+        {effectiveP.map((p, i) => {
           const label = labels && labels[i] ? labels[i] : `Arm ${String.fromCharCode(65 + i)}`
+          const isBest = p === effectiveOptimal
           return (
-            <span key={i} style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: p === armConfig.optimal ? '#1D9E75' : 'var(--color-text-secondary)' }}>
-              {label}: <strong>{p.toFixed(2)}</strong>{p === armConfig.optimal ? ' \u2605' : ''}
+            <span key={i} style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: isBest ? '#1D9E75' : 'var(--color-text-secondary)', transition: 'color 0.3s' }}>
+              {label}: <strong>{p.toFixed(2)}</strong>{isBest ? ' \u2605' : ''}
             </span>
           )
         })}
+        {driftFn && (
+          <span style={{ fontSize: 9, color: '#D85A30', marginLeft: 'auto' }}>
+            step {activePulls}
+          </span>
+        )}
       </div>
 
       {/* Sidebar + Content layout */}
@@ -327,7 +354,7 @@ export default function App() {
           {/* Policy panels — all mounted to preserve state, only active is shown */}
           {POLICIES.map(p => (
             <div key={p.id} style={{ display: p.id === activeTab ? 'block' : 'none' }}>
-              <PolicyPanel policy={p} armConfig={armConfig} driftFn={driftFn} labels={labels} />
+              <PolicyPanel policy={p} armConfig={armConfig} driftFn={driftFn} labels={labels} onPullsChange={handlePullsChange(p.id)} />
             </div>
           ))}
 
