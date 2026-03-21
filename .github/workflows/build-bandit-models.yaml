@@ -102,13 +102,15 @@ jobs:
       - name: Install MinIO client
         if: github.event_name != 'pull_request'
         run: |
-          curl -sL https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc
-          chmod +x /usr/local/bin/mc
-          mc alias set minio "${{ secrets.MINIO_ENDPOINT }}" "${{ secrets.MINIO_ACCESS_KEY }}" "${{ secrets.MINIO_SECRET_KEY }}"
+          mkdir -p "$HOME/.local/bin"
+          curl -sL https://dl.min.io/client/mc/release/linux-amd64/mc -o "$HOME/.local/bin/mc"
+          chmod +x "$HOME/.local/bin/mc"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Upload to S3
         if: github.event_name != 'pull_request'
         run: |
+          mc alias set minio "${{ secrets.MINIO_ENDPOINT }}" "${{ secrets.MINIO_ACCESS_KEY }}" "${{ secrets.MINIO_SECRET_KEY }}"
           mc cp "models/${{ matrix.policy }}/model.py" "minio/${{ env.S3_BUCKET }}/${{ matrix.policy }}/model.py"
           mc cp "models/${{ matrix.policy }}/model-settings.json" "minio/${{ env.S3_BUCKET }}/${{ matrix.policy }}/model-settings.json"
 
