@@ -70,48 +70,34 @@ def fig_to_base64(fig) -> str:
     return base64.b64encode(buf.read()).decode("utf-8")
 
 
-def make_trace_plot(idata: az.InferenceData, var_names: list[str]) -> str:
-    """Generate a trace plot and return as base64 PNG."""
-    fig, axes = plt.subplots(len(var_names), 2, figsize=(10, 2.5 * len(var_names)))
-    if len(var_names) == 1:
-        axes = axes.reshape(1, -1)
-
-    az.plot_trace(idata, var_names=var_names, ax=axes)
-
-    # Style for dark theme
-    for ax_row in axes:
-        for ax in ax_row:
-            ax.set_facecolor("#0d1117")
-            ax.tick_params(colors="#8b949e")
-            ax.xaxis.label.set_color("#8b949e")
-            ax.yaxis.label.set_color("#8b949e")
-            ax.title.set_color("#c9d1d9")
-            for spine in ax.spines.values():
-                spine.set_color("#30363d")
-
+def _style_axes_dark(fig):
+    """Apply dark theme to all axes in a figure."""
+    for ax in fig.get_axes():
+        ax.set_facecolor("#0d1117")
+        ax.tick_params(colors="#8b949e")
+        ax.xaxis.label.set_color("#8b949e")
+        ax.yaxis.label.set_color("#8b949e")
+        ax.title.set_color("#c9d1d9")
+        for spine in ax.spines.values():
+            spine.set_color("#30363d")
     fig.patch.set_facecolor("#0d1117")
     fig.tight_layout()
+
+
+def make_trace_plot(idata: az.InferenceData, var_names: list[str]) -> str:
+    """Generate a trace plot and return as base64 PNG."""
+    axes = az.plot_trace(idata, var_names=var_names)
+    fig = axes.ravel()[0].get_figure()
+    _style_axes_dark(fig)
     return fig_to_base64(fig)
 
 
 def make_posterior_plot(idata: az.InferenceData, var_names: list[str]) -> str:
     """Generate a posterior distribution plot and return as base64 PNG."""
-    fig, axes = plt.subplots(1, len(var_names), figsize=(3 * len(var_names), 3))
-    if len(var_names) == 1:
-        axes = [axes]
-
-    az.plot_posterior(idata, var_names=var_names, ax=axes)
-
-    for ax in axes:
-        ax.set_facecolor("#0d1117")
-        ax.tick_params(colors="#8b949e")
-        ax.xaxis.label.set_color("#8b949e")
-        ax.title.set_color("#c9d1d9")
-        for spine in ax.spines.values():
-            spine.set_color("#30363d")
-
-    fig.patch.set_facecolor("#0d1117")
-    fig.tight_layout()
+    axes = az.plot_posterior(idata, var_names=var_names)
+    axes_flat = axes.ravel() if hasattr(axes, 'ravel') else [axes]
+    fig = axes_flat[0].get_figure()
+    _style_axes_dark(fig)
     return fig_to_base64(fig)
 
 
@@ -120,22 +106,20 @@ def make_ppc_plot(idata: az.InferenceData) -> str | None:
     if not hasattr(idata, "posterior_predictive"):
         return None
 
-    fig, ax = plt.subplots(figsize=(8, 4))
     try:
-        az.plot_ppc(idata, ax=ax)
-        ax.set_facecolor("#0d1117")
-        ax.tick_params(colors="#8b949e")
-        ax.xaxis.label.set_color("#8b949e")
-        ax.yaxis.label.set_color("#8b949e")
-        ax.title.set_color("#c9d1d9")
-        for spine in ax.spines.values():
-            spine.set_color("#30363d")
-        ax.legend(facecolor="#161b22", edgecolor="#30363d", labelcolor="#c9d1d9")
-        fig.patch.set_facecolor("#0d1117")
-        fig.tight_layout()
+        axes = az.plot_ppc(idata)
+        axes_flat = axes.ravel() if hasattr(axes, 'ravel') else [axes]
+        fig = axes_flat[0].get_figure()
+        _style_axes_dark(fig)
+        for ax in fig.get_axes():
+            legend = ax.get_legend()
+            if legend:
+                legend.get_frame().set_facecolor("#161b22")
+                legend.get_frame().set_edgecolor("#30363d")
+                for text in legend.get_texts():
+                    text.set_color("#c9d1d9")
         return fig_to_base64(fig)
     except Exception:
-        plt.close(fig)
         return None
 
 
