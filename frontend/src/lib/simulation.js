@@ -63,6 +63,36 @@ function vtMv(v, M, u) {
   return v.reduce((s, vi, i) => s + vi * M[i].reduce((ss, mij, j) => ss + mij * u[j], 0), 0)
 }
 
+// Cholesky decomposition (lower triangular L such that M = L L^T)
+function cholesky(M) {
+  const d = M.length
+  const L = Array.from({ length: d }, () => new Array(d).fill(0))
+  for (let i = 0; i < d; i++) {
+    for (let j = 0; j <= i; j++) {
+      let sum = 0
+      for (let k = 0; k < j; k++) sum += L[i][k] * L[j][k]
+      if (i === j) {
+        L[i][j] = Math.sqrt(Math.max(0, M[i][i] - sum))
+      } else {
+        L[i][j] = L[j][j] > 1e-12 ? (M[i][j] - sum) / L[j][j] : 0
+      }
+    }
+  }
+  return L
+}
+
+// Sample from N(mean, cov) using Cholesky decomposition
+function mvnSample(mean, cov) {
+  const d = mean.length
+  const L = cholesky(cov)
+  const z = Array.from({ length: d }, () => {
+    // Box-Muller transform for standard normal
+    const u1 = Math.random(), u2 = Math.random()
+    return Math.sqrt(-2 * Math.log(u1 + 1e-10)) * Math.cos(2 * Math.PI * u2)
+  })
+  return mean.map((m, i) => m + L[i].reduce((s, l, j) => s + l * z[j], 0))
+}
+
 // Gauss-Jordan inverse (good enough for d≤8 in a demo)
 function inv(M) {
   const d = M.length
@@ -103,6 +133,25 @@ export function makeState(policy, armConfig = DEFAULT_CONFIG) {
         alpha: 1.0,
         A: Array.from({ length: n }, () => eye(d)),
         b: Array.from({ length: n }, () => new Array(d).fill(0)),
+        counts: new Array(n).fill(0),
+        rewards: new Array(n).fill(0),
+        lastCtx: null,
+      }
+    }
+    case 'bayesian-ucb':
+      return { ...base, alpha: new Array(n).fill(1), beta: new Array(n).fill(1), c: 3.0 }
+    case 'exp3':
+      return { ...base, weights: new Array(n).fill(1), gamma: 0.1, counts: new Array(n).fill(0), rewards: new Array(n).fill(0) }
+    case 'lints': {
+      const d = 4
+      return {
+        ...base,
+        d,
+        v: 1.0,
+        A: Array.from({ length: n }, () => eye(d)),
+        b: Array.from({ length: n }, () => new Array(d).fill(0)),
+        counts: new Array(n).fill(0),
+        rewards: new Array(n).fill(0),
         lastCtx: null,
       }
     }
@@ -141,6 +190,42 @@ export function selectArm(state, context = null, armConfig = DEFAULT_CONFIG) {
       })
       return scores.indexOf(Math.max(...scores))
     }
+    case 'bayesian-ucb': {
+      const ucbs = state.alpha.map((a, i) => {
+        const b = state.beta[i]
+        const mean = a / (a + b)
+        const ab = a + b
+        const std = Math.sqrt(a * b / (ab * ab * (ab + 1)))
+        return mean + state.c * std
+      })
+      return ucbs.indexOf(Math.max(...ucbs))
+    }
+    case 'exp3': {
+      const wSum = state.weights.reduce((s, w) => s + w, 0)
+      const n = armConfig.nArms
+      const probs = state.weights.map(w => (1 - state.gamma) * w / wSum + state.gamma / n)
+      // Categorical sample
+      const r = Math.random()
+      let cumP = 0
+      for (let i = 0; i < n; i++) {
+        cumP += probs[i]
+        if (r < cumP) return i
+      }
+      return n - 1
+    }
+    case 'lints': {
+      const ctx = context || Array.from({ length: state.d }, () => Math.random())
+      state.lastCtx = ctx
+      const scores = state.A.map((A, i) => {
+        const Ainv = inv(A)
+        const thetaHat = matvec(Ainv, state.b[i])
+        // Scale covariance by v^2
+        const cov = Ainv.map(row => row.map(v => v * state.v * state.v))
+        const thetaSample = mvnSample(thetaHat, cov)
+        return ctx.reduce((s, c, j) => s + c * thetaSample[j], 0)
+      })
+      return scores.indexOf(Math.max(...scores))
+    }
   }
 }
 
@@ -173,6 +258,33 @@ export function updateState(state, arm, reward, armConfig = DEFAULT_CONFIG, drif
       const ctx = state.lastCtx || Array.from({ length: state.d }, () => 0.5)
       next.A[arm] = outerAdd(state.A[arm], ctx)
       next.b[arm] = state.b[arm].map((v, j) => v + reward * ctx[j])
+      next.counts[arm] += 1
+      next.rewards[arm] += reward
+      break
+    }
+    case 'bayesian-ucb':
+      if (reward >= 0.5) next.alpha[arm] += 1
+      else next.beta[arm] += 1
+      break
+    case 'exp3': {
+      const wSum = state.weights.reduce((s, w) => s + w, 0)
+      const n = state.weights.length
+      const p = (1 - state.gamma) * state.weights[arm] / wSum + state.gamma / n
+      const estReward = reward / Math.max(p, 1e-10)
+      next.weights[arm] = state.weights[arm] * Math.exp(state.gamma * estReward / n)
+      // Normalize to prevent overflow
+      const maxW = Math.max(...next.weights)
+      next.weights = next.weights.map(w => w / maxW)
+      next.counts[arm] += 1
+      next.rewards[arm] += reward
+      break
+    }
+    case 'lints': {
+      const ctx = state.lastCtx || Array.from({ length: state.d }, () => 0.5)
+      next.A[arm] = outerAdd(state.A[arm], ctx)
+      next.b[arm] = state.b[arm].map((v, j) => v + reward * ctx[j])
+      next.counts[arm] += 1
+      next.rewards[arm] += reward
       break
     }
   }
@@ -189,12 +301,18 @@ export function getEstimatedValues(state) {
     case 'thompson-sampling':
       return state.alpha.map((a, i) => +(a / (a + state.beta[i])).toFixed(3))
     case 'linucb':
+    case 'lints':
       return state.A.map((A, i) => {
         try {
           const theta = matvec(inv(A), state.b[i])
           return +(theta.reduce((s, v) => s + v, 0) / state.d).toFixed(3)
         } catch { return 0 }
       })
+    case 'bayesian-ucb':
+      return state.alpha.map((a, i) => +(a / (a + state.beta[i])).toFixed(3))
+    case 'exp3': {
+      return state.counts.map((n, i) => n > 0 ? +(state.rewards[i] / n).toFixed(3) : 0)
+    }
   }
 }
 
@@ -202,11 +320,13 @@ export function getPullCounts(state) {
   switch (state.policy) {
     case 'epsilon-greedy':
     case 'ucb':
+    case 'exp3':
+    case 'linucb':
+    case 'lints':
       return [...state.counts]
     case 'thompson-sampling':
+    case 'bayesian-ucb':
       return state.alpha.map((a, i) => Math.max(0, Math.round(a + state.beta[i] - 2)))
-    case 'linucb':
-      return new Array(state.A.length).fill(0)  // LinUCB doesn't track counts directly
   }
 }
 
@@ -222,6 +342,7 @@ export function drawReward(arm, armConfig = DEFAULT_CONFIG, step = 0, driftFn = 
 export function getBetaParams(state) {
   switch (state.policy) {
     case 'thompson-sampling':
+    case 'bayesian-ucb':
       return state.alpha.map((a, i) => ({ alpha: a, beta: state.beta[i] }))
     case 'epsilon-greedy':
     case 'ucb':
@@ -230,8 +351,22 @@ export function getBetaParams(state) {
         return { alpha: s + 1, beta: (n - s) + 1 }
       })
     case 'linucb':
-      return state.A.map(() => ({ alpha: 1, beta: 1 }))
+    case 'lints':
+    case 'exp3':
+      return state.counts.map((n, i) => {
+        const s = Math.max(0, Math.round(state.rewards[i]))
+        return { alpha: s + 1, beta: (n - s) + 1 }
+      })
     default:
       return []
   }
+}
+
+// ── EXP3 probability weights (for WeightsChart) ─────────────────────────────
+
+export function getEXP3Probabilities(state) {
+  if (state.policy !== 'exp3') return null
+  const wSum = state.weights.reduce((s, w) => s + w, 0)
+  const n = state.weights.length
+  return state.weights.map(w => (1 - state.gamma) * w / wSum + state.gamma / n)
 }

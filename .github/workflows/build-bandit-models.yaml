@@ -66,7 +66,7 @@ jobs:
 
             if [ "$CHANGED" = "[]" ] || [ -z "$CHANGED" ]; then
               # Fallback: build all on non-path-specific pushes
-              echo 'policies=["epsilon_greedy","ucb","thompson_sampling","linucb"]' >> "$GITHUB_OUTPUT"
+              echo 'policies=["epsilon_greedy","ucb","thompson_sampling","linucb","bayesian_ucb","exp3","lints"]' >> "$GITHUB_OUTPUT"
             else
               echo "policies=$CHANGED" >> "$GITHUB_OUTPUT"
             fi

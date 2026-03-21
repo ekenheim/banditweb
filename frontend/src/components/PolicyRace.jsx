@@ -1,36 +1,63 @@
 /**
  * components/PolicyRace.jsx
- * Runs all 4 policies simultaneously on the same arm config, overlays cumulative reward.
+ * Runs selected policies simultaneously on the same arm config, overlays cumulative reward.
  */
-import React, { useState, useRef, useCallback, useEffect } from 'react'
+import React, { useState, useRef, useCallback, useEffect, useImperativeHandle, forwardRef } from 'react'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
 } from 'recharts'
 import { useBandit } from '../hooks/useBandit'
 
 const RACE_POLICIES = [
-  { id: 'epsilon-greedy', label: 'e-Greedy', color: '#E89320' },
-  { id: 'ucb',            label: 'UCB1',     color: '#378ADD' },
-  { id: 'thompson-sampling', label: 'Thompson', color: '#1D9E75' },
-  { id: 'linucb',         label: 'LinUCB',   color: '#D85A30' },
+  { id: 'epsilon-greedy',    label: '\u03b5-Greedy',  color: '#E89320' },
+  { id: 'ucb',               label: 'UCB1',       color: '#378ADD' },
+  { id: 'thompson-sampling', label: 'Thompson',   color: '#1D9E75' },
+  { id: 'bayesian-ucb',      label: 'Bayes UCB',  color: '#9B59B6' },
+  { id: 'exp3',              label: 'EXP3',       color: '#E74C3C' },
+  { id: 'linucb',            label: 'LinUCB',     color: '#D85A30' },
+  { id: 'lints',             label: 'LinTS',      color: '#F39C12' },
 ]
 
 const TICK_STYLE = { fontSize: 10, fontFamily: 'var(--font-mono)', fill: 'var(--color-text-secondary)' }
 
-export default function PolicyRace({ armConfig, driftFn }) {
-  const eg = useBandit('epsilon-greedy', armConfig, driftFn)
-  const ucb = useBandit('ucb', armConfig, driftFn)
-  const ts = useBandit('thompson-sampling', armConfig, driftFn)
-  const lin = useBandit('linucb', armConfig, driftFn)
-  const hooks = [eg, ucb, ts, lin]
+// ── Per-policy runner (owns its own useBandit hook) ────────────────────────
 
+const RacePolicyRunner = forwardRef(function RacePolicyRunner({ policyId, armConfig, driftFn }, ref) {
+  const bandit = useBandit(policyId, armConfig, driftFn)
+  useImperativeHandle(ref, () => bandit, [bandit])
+  return null // Headless — just holds state
+})
+
+// ── Main component ────────────────────────────────────────────────────────
+
+export default function PolicyRace({ armConfig, driftFn }) {
+  const [selected, setSelected] = useState(() => new Set(RACE_POLICIES.map(p => p.id)))
   const [autoOn, setAutoOn] = useState(false)
   const [speed, setSpeed] = useState(5)
   const intervalRef = useRef(null)
 
+  // Refs for all policy runners (always all 7 mounted)
+  const runnerRefs = useRef({})
+  RACE_POLICIES.forEach(p => {
+    if (!runnerRefs.current[p.id]) runnerRefs.current[p.id] = React.createRef()
+  })
+
+  const togglePolicy = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
   const pullAll = useCallback(async () => {
-    await Promise.all(hooks.map(h => h.pull()))
-  }, [eg.pull, ucb.pull, ts.pull, lin.pull]) // eslint-disable-line
+    const promises = RACE_POLICIES
+      .filter(p => selected.has(p.id))
+      .map(p => runnerRefs.current[p.id]?.current?.pull())
+      .filter(Boolean)
+    await Promise.all(promises)
+  }, [selected])
 
   const pullAllRef = useRef(pullAll)
   pullAllRef.current = pullAll
@@ -55,37 +82,83 @@ export default function PolicyRace({ armConfig, driftFn }) {
 
   const handleReset = async () => {
     stopAuto()
-    await Promise.all(hooks.map(h => h.reset()))
+    await Promise.all(
+      RACE_POLICIES.map(p => runnerRefs.current[p.id]?.current?.reset()).filter(Boolean)
+    )
   }
 
+  // Collect state from all runners
+  const hooks = RACE_POLICIES.map(p => ({
+    policy: p,
+    bandit: runnerRefs.current[p.id]?.current,
+  }))
+
+  const activeHooks = hooks.filter(h => selected.has(h.policy.id) && h.bandit)
+
   // Merge histories for overlay chart
-  const maxLen = Math.max(...hooks.map(h => h.state.hist.length))
+  const maxLen = Math.max(0, ...activeHooks.map(h => h.bandit?.state?.hist?.length || 0))
   const merged = []
   const step = Math.max(1, Math.floor(maxLen / 150))
   for (let i = 0; i < maxLen; i++) {
     if (i % step !== 0 && i !== maxLen - 1) continue
     const point = { t: i + 1 }
-    hooks.forEach((h, j) => {
-      const entry = h.state.hist[i]
-      point[RACE_POLICIES[j].id] = entry ? entry.cumR : null
+    activeHooks.forEach(h => {
+      const entry = h.bandit?.state?.hist?.[i]
+      point[h.policy.id] = entry ? entry.cumR : null
     })
-    // Random baseline from first hook that has data at this index
-    const entry = hooks[0].state.hist[i]
-    point.random = entry ? entry.cumRandom : null
+    const firstEntry = activeHooks[0]?.bandit?.state?.hist?.[i]
+    point.random = firstEntry ? firstEntry.cumRandom : null
     merged.push(point)
   }
 
   // Summary table
-  const pulls = hooks[0].state.pulls
-  const summary = RACE_POLICIES.map((p, i) => ({
-    ...p,
-    pulls: hooks[i].state.pulls,
-    cumR: hooks[i].state.cumR,
-    cumReg: hooks[i].state.cumReg,
-  })).sort((a, b) => b.cumR - a.cumR)
+  const pulls = activeHooks[0]?.bandit?.state?.pulls || 0
+  const summary = activeHooks
+    .map(h => ({
+      ...h.policy,
+      pulls: h.bandit?.state?.pulls || 0,
+      cumR: h.bandit?.state?.cumR || 0,
+      cumReg: h.bandit?.state?.cumReg || 0,
+    }))
+    .sort((a, b) => b.cumR - a.cumR)
 
   return (
     <div>
+      {/* All runners (headless, always mounted) */}
+      {RACE_POLICIES.map(p => (
+        <RacePolicyRunner
+          key={p.id}
+          ref={runnerRefs.current[p.id]}
+          policyId={p.id}
+          armConfig={armConfig}
+          driftFn={driftFn}
+        />
+      ))}
+
+      {/* Policy selector */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+        {RACE_POLICIES.map(p => (
+          <button
+            key={p.id}
+            onClick={() => togglePolicy(p.id)}
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: 10,
+              padding: '3px 8px',
+              borderRadius: 'var(--border-radius-md)',
+              border: `1px solid ${p.color}`,
+              background: selected.has(p.id) ? p.color + '22' : 'transparent',
+              color: selected.has(p.id) ? p.color : 'var(--color-text-secondary)',
+              cursor: 'pointer',
+              opacity: selected.has(p.id) ? 1 : 0.5,
+              transition: 'all .12s',
+            }}
+          >
+            {selected.has(p.id) ? '\u2713 ' : ''}{p.label}
+          </button>
+        ))}
+      </div>
+
       {/* Controls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
         <button
@@ -93,13 +166,13 @@ export default function PolicyRace({ armConfig, driftFn }) {
           style={{
             fontFamily: 'var(--font-mono)', fontSize: 11, padding: '5px 12px',
             borderRadius: 'var(--border-radius-md)',
-            border: `0.5px solid #1D9E75`,
+            border: '0.5px solid #1D9E75',
             background: autoOn ? '#1D9E75' : 'transparent',
             color: autoOn ? '#fff' : '#1D9E75',
             cursor: 'pointer',
           }}
         >
-          {autoOn ? '⏸ Running' : '▶ Race'}
+          {autoOn ? '\u23F8 Running' : '\u25B6 Race'}
         </button>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--color-text-secondary)', fontFamily: 'var(--font-mono)' }}>
@@ -110,7 +183,7 @@ export default function PolicyRace({ armConfig, driftFn }) {
         </div>
 
         <button onClick={handleReset} style={{ fontFamily: 'var(--font-mono)', fontSize: 11, padding: '5px 12px', borderRadius: 'var(--border-radius-md)', border: '0.5px solid var(--color-border-secondary)', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-secondary)' }}>
-          ⟳ Reset
+          {'\u27F3'} Reset
         </button>
 
         <span style={{ fontSize: 10, color: 'var(--color-text-secondary)', fontFamily: 'var(--font-mono)', marginLeft: 'auto' }}>
@@ -121,7 +194,7 @@ export default function PolicyRace({ armConfig, driftFn }) {
       {/* Overlay chart */}
       <div style={{ marginBottom: 16 }}>
         <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', fontFamily: 'var(--font-mono)', marginBottom: 6 }}>
-          cumulative reward — all policies
+          cumulative reward — selected policies
         </div>
         <ResponsiveContainer width="100%" height={220}>
           <LineChart data={merged}>
@@ -130,9 +203,9 @@ export default function PolicyRace({ armConfig, driftFn }) {
             <YAxis tick={TICK_STYLE} axisLine={false} tickLine={false} width={36} />
             <Tooltip
               contentStyle={{ background: 'var(--color-background-primary)', border: '0.5px solid var(--color-border-tertiary)', borderRadius: 8, fontSize: 11, fontFamily: 'var(--font-mono)' }}
-              formatter={v => [v !== null ? v.toFixed(2) : '—']}
+              formatter={v => [v !== null ? v.toFixed(2) : '\u2014']}
             />
-            {RACE_POLICIES.map(p => (
+            {RACE_POLICIES.filter(p => selected.has(p.id)).map(p => (
               <Line key={p.id} type="monotone" dataKey={p.id} name={p.label} stroke={p.color} dot={false} strokeWidth={1.5} connectNulls />
             ))}
             <Line type="monotone" dataKey="random" name="Random" stroke="#8b949e" dot={false} strokeWidth={1} strokeDasharray="2 4" opacity={0.6} />

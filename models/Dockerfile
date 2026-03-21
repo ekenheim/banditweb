@@ -33,6 +33,9 @@ RUN case "${POLICY}" in \
       ucb)                CLASS=UCBModel ;; \
       thompson_sampling)  CLASS=ThompsonSamplingModel ;; \
       linucb)             CLASS=LinUCBModel ;; \
+      bayesian_ucb)       CLASS=BayesianUCBModel ;; \
+      exp3)               CLASS=EXP3Model ;; \
+      lints)              CLASS=LinTSModel ;; \
       *) echo "Unknown policy: ${POLICY}" && exit 1 ;; \
     esac \
     && echo "MLSERVER_MODEL_IMPLEMENTATION=bandit_runtime.${POLICY}.${CLASS}" > /app/.env

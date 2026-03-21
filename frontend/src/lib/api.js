@@ -18,6 +18,9 @@ const MODEL_NAMES = {
   ucb: 'ucb',
   'thompson-sampling': 'thompson-sampling',
   linucb: 'linucb',
+  'bayesian-ucb': 'bayesian-ucb',
+  exp3: 'exp3',
+  lints: 'lints',
 }
 
 async function post(policy, body) {

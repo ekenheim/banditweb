@@ -5,7 +5,17 @@
       "Bash(npx vite:*)",
       "Bash(npm install:*)",
       "Bash(VITE_SIMULATE=true npx vite build 2>&1)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(grep:*)",
+      "Bash(for dir:*)",
+      "Bash(do echo:*)",
+      "Read(//c/Users/ekenh/Downloads/bandit-demo/models/**)",
+      "Bash(done)",
+      "Bash(find /c/Users/ekenh/Downloads/bandit-demo/.github -type f -name *model* -o -name *bandit*)",
+      "Bash(find /c/Users/ekenh/Downloads/bandit-demo/kubernetes -type f -name *.yaml)",
+      "Bash(find /c/Users/ekenh/Downloads/bandit-demo -path *kubernetes* -type f)",
+      "Bash(VITE_SIMULATE=true npx vite build)",
+      "Bash(VITE_SIMULATE=true npx vite --port 3000)"
     ]
   }
 }

@@ -36,7 +36,7 @@ export function useBandit(policy, armConfig = sim.DEFAULT_CONFIG, driftFn = null
   }, [armConfig.nArms, policy, armConfig])
 
   const makeContext = useCallback(() => {
-    if (policy !== 'linucb') return null
+    if (policy !== 'linucb' && policy !== 'lints') return null
     return [
       Math.round((new Date().getHours() / 23) * 10) / 10,
       Math.round(Math.random() * 10) / 10,
