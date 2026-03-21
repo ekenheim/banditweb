@@ -1,0 +1,51 @@
+---
+# .github/workflows/build-bandit-analysis.yaml
+name: Build Bandit Analysis Service
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "analysis/**"
+      - ".github/workflows/build-bandit-analysis.yaml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "analysis/**"
+  workflow_dispatch:
+
+env:
+  REGISTRY: ${{ secrets.HARBOR_REGISTRY }}
+  IMAGE: banditweb/bandit-analysis
+
+jobs:
+  build:
+    runs-on: gha-runner-scale-set-banditweb
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Harbor
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.HARBOR_USERNAME }}
+          password: ${{ secrets.HARBOR_PASSWORD }}
+
+      - name: Build image
+        run: |
+          docker build --network=host \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }} \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE }}:latest \
+            ./analysis
+
+      - name: Push image
+        if: github.event_name != 'pull_request'
+        run: |
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE }}:latest
+
+      - name: Output summary
+        run: |
+          echo "### Analysis service built" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Tag:** \`${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
