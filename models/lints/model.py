@@ -40,6 +40,7 @@ class BanditBase(MLModel):
         tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow:5000")
         mlflow.set_tracking_uri(tracking_uri)
         mlflow.set_experiment(self.mlflow_experiment)
+        mlflow.end_run()
         self._run = mlflow.start_run(run_name=f"{self.name}-{int(time.time())}")
         self._init_state(params)
         return True
