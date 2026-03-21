@@ -11,6 +11,11 @@ export default defineConfig({
         target: process.env.VITE_DEV_CLUSTER || 'http://localhost:8080',
         changeOrigin: true,
         secure: false,
+      },
+      '/analysis': {
+        target: process.env.VITE_ANALYSIS_URL || 'http://localhost:8090',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/analysis/, ''),
       }
     }
   },
