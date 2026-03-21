@@ -1,17 +1,21 @@
 ---
 # .github/workflows/build-bandit-models.yaml
 # ─────────────────────────────────────────────────────────────────────────────
-# Builds and pushes all four bandit model Docker images to Harbor on:
+# Uploads bandit model code to MinIO S3 on:
 #   - push to main (changes under models/)
-#   - pull_request targeting main (build only, no push)
+#   - pull_request targeting main (validate only, no upload)
 #   - manual dispatch (workflow_dispatch)
 #
+# Each policy is uploaded as a self-contained directory:
+#   s3://bandit-models/<policy>/model.py
+#   s3://bandit-models/<policy>/model-settings.json
+#
 # Secrets required (set in repo Settings → Secrets):
-#   HARBOR_REGISTRY   — e.g. harbor.yourdomain.com
-#   HARBOR_USERNAME   — robot account with push rights
-#   HARBOR_PASSWORD   — robot account secret
+#   MINIO_ENDPOINT    — e.g. https://s3.yourdomain.com
+#   MINIO_ACCESS_KEY  — MinIO access key
+#   MINIO_SECRET_KEY  — MinIO secret key
 # ─────────────────────────────────────────────────────────────────────────────
-name: Build Bandit Model Images
+name: Deploy Bandit Models to S3
 
 on:
   push:
@@ -26,17 +30,16 @@ on:
   workflow_dispatch:
     inputs:
       policy:
-        description: "Single policy to build (leave empty for all)"
+        description: "Single policy to deploy (leave empty for all)"
         required: false
         default: ""
-      push:
-        description: "Push to Harbor?"
+      upload:
+        description: "Upload to S3?"
         type: boolean
         default: true
 
 env:
-  REGISTRY: ${{ secrets.HARBOR_REGISTRY }}
-  PROJECT: banditweb
+  S3_BUCKET: bandit-models
 
 jobs:
   # ── Determine which policies changed ───────────────────────────────────────
@@ -51,10 +54,8 @@ jobs:
         id: filter
         run: |
           if [ -n "${{ github.event.inputs.policy }}" ]; then
-            # Manual dispatch with specific policy
             echo "policies=[\"${{ github.event.inputs.policy }}\"]" >> "$GITHUB_OUTPUT"
           else
-            # Detect changed policy directories
             CHANGED=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} \
               | grep '^models/' \
               | cut -d/ -f2 \
@@ -65,15 +66,14 @@ jobs:
               | jq -R . | jq -sc .)
 
             if [ "$CHANGED" = "[]" ] || [ -z "$CHANGED" ]; then
-              # Fallback: build all on non-path-specific pushes
               echo 'policies=["epsilon_greedy","ucb","thompson_sampling","linucb","bayesian_ucb","exp3","lints"]' >> "$GITHUB_OUTPUT"
             else
               echo "policies=$CHANGED" >> "$GITHUB_OUTPUT"
             fi
           fi
 
-  # ── Build & push ───────────────────────────────────────────────────────────
-  build:
+  # ── Validate & upload ────────────────────────────────────────────────────
+  deploy:
     needs: changes
     runs-on: gha-runner-scale-set-banditweb
     strategy:
@@ -84,47 +84,43 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Log in to Harbor
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.HARBOR_USERNAME }}
-          password: ${{ secrets.HARBOR_PASSWORD }}
-
-      # Derive image tag: policy name with underscores → hyphens
-      - name: Compute image name
-        id: image
+      - name: Validate model files exist
         run: |
-          SLUG=$(echo "${{ matrix.policy }}" | tr '_' '-')
-          echo "slug=$SLUG" >> "$GITHUB_OUTPUT"
-          echo "tag=${{ env.REGISTRY }}/${{ env.PROJECT }}/${SLUG}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
-          echo "latest=${{ env.REGISTRY }}/${{ env.PROJECT }}/${SLUG}:latest" >> "$GITHUB_OUTPUT"
+          if [ ! -f "models/${{ matrix.policy }}/model.py" ]; then
+            echo "::error::Missing models/${{ matrix.policy }}/model.py"
+            exit 1
+          fi
+          if [ ! -f "models/${{ matrix.policy }}/model-settings.json" ]; then
+            echo "::error::Missing models/${{ matrix.policy }}/model-settings.json"
+            exit 1
+          fi
+          echo "Validated: models/${{ matrix.policy }}/"
 
-      - name: Build image
-        run: |
-          docker build --network=host \
-            --build-arg POLICY=${{ matrix.policy }} \
-            -t ${{ steps.image.outputs.tag }} \
-            -t ${{ steps.image.outputs.latest }} \
-            -f ./models/Dockerfile \
-            ./models
+      - name: Validate Python syntax
+        run: python3 -c "import py_compile; py_compile.compile('models/${{ matrix.policy }}/model.py', doraise=True)"
 
-      - name: Push image
+      - name: Install MinIO client
         if: github.event_name != 'pull_request'
         run: |
-          docker push ${{ steps.image.outputs.tag }}
-          docker push ${{ steps.image.outputs.latest }}
+          curl -sL https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc
+          chmod +x /usr/local/bin/mc
+          mc alias set minio "${{ secrets.MINIO_ENDPOINT }}" "${{ secrets.MINIO_ACCESS_KEY }}" "${{ secrets.MINIO_SECRET_KEY }}"
 
-      - name: Output image digest
+      - name: Upload to S3
+        if: github.event_name != 'pull_request'
         run: |
-          echo "### Image built" >> "$GITHUB_STEP_SUMMARY"
+          mc cp "models/${{ matrix.policy }}/model.py" "minio/${{ env.S3_BUCKET }}/${{ matrix.policy }}/model.py"
+          mc cp "models/${{ matrix.policy }}/model-settings.json" "minio/${{ env.S3_BUCKET }}/${{ matrix.policy }}/model-settings.json"
+
+      - name: Output summary
+        run: |
+          echo "### Model deployed" >> "$GITHUB_STEP_SUMMARY"
           echo "**Policy:** \`${{ matrix.policy }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Tag:** \`${{ steps.image.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Destination:** \`s3://${{ env.S3_BUCKET }}/${{ matrix.policy }}/\`" >> "$GITHUB_STEP_SUMMARY"
 
   # ── Trigger Flux reconciliation ────────────────────────────────────────────
   flux-reconcile:
-    needs: build
+    needs: deploy
     runs-on: gha-runner-scale-set-banditweb
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     steps:
@@ -134,8 +130,6 @@ jobs:
           version: latest
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # Flux watches the kubernetes/ dir automatically via GitRepository,
-      # so an explicit reconcile is optional — this just forces it immediately.
       - run: |
           flux reconcile kustomization bandit-demo \
             --with-source \

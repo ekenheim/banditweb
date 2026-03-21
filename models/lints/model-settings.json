@@ -1,0 +1,12 @@
+{
+  "name": "lints",
+  "implementation": "model.LinTSModel",
+  "parameters": {
+    "extra": {
+      "n_arms": "5",
+      "mlflow_experiment": "bandit-lints",
+      "context_dim": "4",
+      "v": "1.0"
+    }
+  }
+}

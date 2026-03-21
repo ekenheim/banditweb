@@ -1,0 +1,12 @@
+{
+  "name": "linucb",
+  "implementation": "model.LinUCBModel",
+  "parameters": {
+    "extra": {
+      "n_arms": "5",
+      "mlflow_experiment": "bandit-linucb",
+      "context_dim": "4",
+      "alpha": "1.0"
+    }
+  }
+}

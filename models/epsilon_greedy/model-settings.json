@@ -1,0 +1,11 @@
+{
+  "name": "epsilon-greedy",
+  "implementation": "model.EpsilonGreedyModel",
+  "parameters": {
+    "extra": {
+      "n_arms": "5",
+      "mlflow_experiment": "bandit-epsilon-greedy",
+      "epsilon": "0.1"
+    }
+  }
+}

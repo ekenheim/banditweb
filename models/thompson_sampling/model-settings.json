@@ -1,0 +1,10 @@
+{
+  "name": "thompson-sampling",
+  "implementation": "model.ThompsonSamplingModel",
+  "parameters": {
+    "extra": {
+      "n_arms": "5",
+      "mlflow_experiment": "bandit-thompson-sampling"
+    }
+  }
+}

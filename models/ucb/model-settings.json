@@ -1,0 +1,11 @@
+{
+  "name": "ucb",
+  "implementation": "model.UCBModel",
+  "parameters": {
+    "extra": {
+      "n_arms": "5",
+      "mlflow_experiment": "bandit-ucb",
+      "c": "2.0"
+    }
+  }
+}

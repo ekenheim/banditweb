@@ -1,0 +1,11 @@
+{
+  "name": "bayesian-ucb",
+  "implementation": "model.BayesianUCBModel",
+  "parameters": {
+    "extra": {
+      "n_arms": "5",
+      "mlflow_experiment": "bandit-bayesian-ucb",
+      "c": "3.0"
+    }
+  }
+}
