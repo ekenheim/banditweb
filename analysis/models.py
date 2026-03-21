@@ -9,6 +9,7 @@ from __future__ import annotations
 import arviz as az
 import numpy as np
 import pymc as pm
+import pytensor.tensor as pt
 
 
 def build_beta_model(
@@ -40,7 +41,7 @@ def build_beta_model(
                 pm.Binomial(f"obs_{i}", n=trials[i], p=theta[i], observed=successes[i])
 
         # Best arm indicator
-        pm.Deterministic("best_arm", pm.math.argmax(theta))
+        pm.Deterministic("best_arm", pt.argmax(theta))
 
         # Pairwise differences (arm i vs best observed arm)
         best_idx = int(np.argmax([s / max(t, 1) for s, t in zip(successes, trials)]))

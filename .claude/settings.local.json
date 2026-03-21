@@ -15,7 +15,9 @@
       "Bash(find /c/Users/ekenh/Downloads/bandit-demo/kubernetes -type f -name *.yaml)",
       "Bash(find /c/Users/ekenh/Downloads/bandit-demo -path *kubernetes* -type f)",
       "Bash(VITE_SIMULATE=true npx vite build)",
-      "Bash(VITE_SIMULATE=true npx vite --port 3000)"
+      "Bash(VITE_SIMULATE=true npx vite --port 3000)",
+      "Bash(python3 -c \":*)",
+      "Bash(python -c \":*)"
     ]
   }
 }
