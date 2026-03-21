@@ -111,6 +111,7 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           mc alias set minio "${{ secrets.MINIO_ENDPOINT }}" "${{ secrets.MINIO_ACCESS_KEY }}" "${{ secrets.MINIO_SECRET_KEY }}"
+          mc mb --ignore-existing "minio/${{ env.S3_BUCKET }}"
           mc cp "models/${{ matrix.policy }}/model.py" "minio/${{ env.S3_BUCKET }}/${{ matrix.policy }}/model.py"
           mc cp "models/${{ matrix.policy }}/model-settings.json" "minio/${{ env.S3_BUCKET }}/${{ matrix.policy }}/model-settings.json"
 
