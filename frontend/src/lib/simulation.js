@@ -126,7 +126,7 @@ export function makeState(policy, armConfig = DEFAULT_CONFIG) {
     case 'thompson-sampling':
       return { ...base, alpha: new Array(n).fill(1), beta: new Array(n).fill(1) }
     case 'linucb': {
-      const d = 4
+      const d = armConfig.contextDim || 4
       return {
         ...base,
         d,
@@ -144,7 +144,7 @@ export function makeState(policy, armConfig = DEFAULT_CONFIG) {
     case 'exp3':
       return { ...base, weights: new Array(n).fill(1), gamma: 0.1, counts: new Array(n).fill(0), rewards: new Array(n).fill(0) }
     case 'lints': {
-      const d = 4
+      const d = armConfig.contextDim || 4
       return {
         ...base,
         d,

@@ -51,6 +51,7 @@ export const ECOMMERCE_SCENARIOS = {
     shortName: 'Recs',
     description: 'Watch the bandit learn which product category to surface for each user type. LinUCB discovers user-type preferences; Thompson Sampling finds the best category on average.',
     defaultPolicy: 'linucb',
+    contextDim: 4,
     policies: [
       { id: 'thompson-sampling', label: 'Thompson', meta: 'non-contextual', color: '#1D9E75' },
       { id: 'linucb', label: 'LinUCB', meta: 'contextual', color: '#D85A30' },
@@ -116,6 +117,7 @@ export const ECOMMERCE_SCENARIOS = {
     shortName: 'Checkout',
     description: 'The bandit learns which intervention recovers abandoned checkouts. Cart value matters — LinUCB discovers that high-value carts respond to different tactics than low-value ones.',
     defaultPolicy: 'linucb',
+    contextDim: 1,
     policies: [
       { id: 'epsilon-greedy', label: '\u03b5-Greedy', meta: '\u03b5=0.1', color: '#E89320' },
       { id: 'linucb', label: 'LinUCB', meta: 'contextual', color: '#D85A30' },

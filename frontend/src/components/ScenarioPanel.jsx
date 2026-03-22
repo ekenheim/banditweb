@@ -17,12 +17,15 @@ import { useBandit } from '../hooks/useBandit'
 import * as sim from '../lib/simulation'
 
 export default function ScenarioPanel({ scenario }) {
-  const { id, description, defaultPolicy, policies, labels, trueP, contextFn, rewardFn, rewardLabel } = scenario
+  const { id, description, defaultPolicy, policies, labels, trueP, contextFn, rewardFn, rewardLabel, contextDim } = scenario
 
   const [activePolicyId, setActivePolicyId] = useState(defaultPolicy)
   const activePolicy = policies.find(p => p.id === activePolicyId) || policies[0]
 
-  const armConfig = useMemo(() => sim.makeArmConfig(trueP), [trueP])
+  const armConfig = useMemo(() => ({
+    ...sim.makeArmConfig(trueP),
+    ...(contextDim != null && { contextDim }),
+  }), [trueP, contextDim])
 
   const {
     state, status, error, pull, reset, lastMeta,
