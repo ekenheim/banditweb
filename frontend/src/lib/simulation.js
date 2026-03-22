@@ -225,6 +225,8 @@ export function selectArm(state, context = null, armConfig = DEFAULT_CONFIG) {
       })
       return scores.indexOf(Math.max(...scores))
     }
+    default:
+      return Math.floor(Math.random() * armConfig.nArms)
   }
 }
 

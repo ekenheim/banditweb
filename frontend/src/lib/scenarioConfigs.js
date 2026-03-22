@@ -71,8 +71,9 @@ export const ECOMMERCE_SCENARIOS = {
     },
 
     rewardFn: (arm, _armConfig, _step, _driftFn, meta) => {
+      const a = Math.max(0, Math.min(arm, RECS_BASE_P.length - 1))
       const typeIdx = meta?.userTypeIdx ?? 0
-      const effectiveP = Math.min(1, RECS_BASE_P[arm] * RECS_MULTIPLIERS[arm][typeIdx])
+      const effectiveP = Math.min(1, RECS_BASE_P[a] * RECS_MULTIPLIERS[a][typeIdx])
       return Math.random() < effectiveP ? 1 : 0
     },
 
@@ -106,8 +107,9 @@ export const ECOMMERCE_SCENARIOS = {
     contextFn: null,  // Non-contextual
 
     rewardFn: (arm) => {
-      const purchased = Math.random() < PRICING_PURCHASE_P[arm] ? 1 : 0
-      return purchased * PRICING_PRICES[arm]  // Revenue reward
+      const a = Math.max(0, Math.min(arm, PRICING_PURCHASE_P.length - 1))
+      const purchased = Math.random() < PRICING_PURCHASE_P[a] ? 1 : 0
+      return purchased * PRICING_PRICES[a]  // Revenue reward
     },
   },
 
@@ -136,12 +138,13 @@ export const ECOMMERCE_SCENARIOS = {
     },
 
     rewardFn: (arm, _armConfig, _step, _driftFn, meta) => {
+      const a = Math.max(0, Math.min(arm, CHECKOUT_BASE_P.length - 1))
       const cartValue = meta?.cartValue ?? 0.5
       // Interpolate between low-cart and high-cart multiplier
-      const lowMult = CHECKOUT_CART_MULT[arm][0]
-      const highMult = CHECKOUT_CART_MULT[arm][1]
+      const lowMult = CHECKOUT_CART_MULT[a][0]
+      const highMult = CHECKOUT_CART_MULT[a][1]
       const mult = lowMult + (highMult - lowMult) * cartValue
-      const effectiveP = Math.min(1, CHECKOUT_BASE_P[arm] * mult)
+      const effectiveP = Math.min(1, CHECKOUT_BASE_P[a] * mult)
       return Math.random() < effectiveP ? 1 : 0
     },
 

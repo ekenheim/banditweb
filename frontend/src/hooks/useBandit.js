@@ -29,14 +29,17 @@ export function useBandit(policy, armConfig = sim.DEFAULT_CONFIG, driftFn = null
   const [lastMeta, setLastMeta] = useState(null)  // scenario context metadata
   const lastContext = useRef(null)
   const prevNArms = useRef(armConfig.nArms)
+  const prevPolicy = useRef(policy)
 
-  // Auto-reset when arm count changes
+  // Auto-reset when arm count or policy changes
   useEffect(() => {
-    if (armConfig.nArms !== prevNArms.current) {
+    if (armConfig.nArms !== prevNArms.current || policy !== prevPolicy.current) {
       setState(sim.makeState(policy, armConfig))
       setStatus('idle')
       setError(null)
+      setLastMeta(null)
       prevNArms.current = armConfig.nArms
+      prevPolicy.current = policy
     }
   }, [armConfig.nArms, policy, armConfig])
 

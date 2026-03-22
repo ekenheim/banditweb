@@ -16,24 +16,19 @@ import CartBreakdownChart from './CartBreakdownChart'
 import { useBandit } from '../hooks/useBandit'
 import * as sim from '../lib/simulation'
 
-export default function ScenarioPanel({ scenario }) {
-  const { id, description, defaultPolicy, policies, labels, trueP, contextFn, rewardFn, rewardLabel, contextDim } = scenario
+// ── Inner component keyed by policyId so hook state resets on policy switch ──
 
-  const [activePolicyId, setActivePolicyId] = useState(defaultPolicy)
-  const activePolicy = policies.find(p => p.id === activePolicyId) || policies[0]
-
-  const armConfig = useMemo(() => ({
-    ...sim.makeArmConfig(trueP),
-    ...(contextDim != null && { contextDim }),
-  }), [trueP, contextDim])
+function ScenarioRunner({ scenario, policyId, armConfig }) {
+  const { id, labels, contextFn, rewardFn, rewardLabel } = scenario
+  const activePolicy = scenario.policies.find(p => p.id === policyId) || scenario.policies[0]
 
   const {
     state, status, error, pull, reset, lastMeta,
-    estimatedValues, pullCounts, betaParams, isSimulating,
+    estimatedValues, pullCounts, betaParams,
   } = useBandit(
-    activePolicyId,
+    policyId,
     armConfig,
-    null,  // no drift for scenarios
+    null,
     contextFn || null,
     rewardFn || null,
   )
@@ -62,51 +57,10 @@ export default function ScenarioPanel({ scenario }) {
 
   useEffect(() => () => stopAuto(), []) // cleanup on unmount
 
-  // Stop auto-run and reset when switching policies
-  const handlePolicySwitch = (policyId) => {
-    stopAuto()
-    setActivePolicyId(policyId)
-  }
-
   const handleReset = async () => { stopAuto(); await reset() }
 
   return (
-    <div>
-      {/* Scenario description */}
-      <div style={{
-        background: 'var(--color-background-secondary)',
-        borderRadius: 'var(--border-radius-md)',
-        padding: '10px 14px',
-        marginBottom: 12,
-        fontSize: 12,
-        color: 'var(--color-text-secondary)',
-        lineHeight: 1.5,
-      }}>
-        {description}
-      </div>
-
-      {/* Policy switcher */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 10, color: 'var(--color-text-secondary)', fontFamily: 'var(--font-mono)' }}>policy:</span>
-        {policies.map(p => (
-          <button
-            key={p.id}
-            onClick={() => handlePolicySwitch(p.id)}
-            style={{
-              fontSize: 11, fontFamily: 'var(--font-mono)', padding: '4px 10px',
-              borderRadius: 'var(--border-radius-md)',
-              border: `0.5px solid ${activePolicyId === p.id ? p.color : 'var(--color-border-secondary)'}`,
-              background: activePolicyId === p.id ? p.color + '18' : 'transparent',
-              color: activePolicyId === p.id ? p.color : 'var(--color-text-secondary)',
-              cursor: 'pointer',
-            }}
-          >
-            {p.label}
-            <span style={{ fontSize: 9, marginLeft: 4, opacity: 0.7 }}>{p.meta}</span>
-          </button>
-        ))}
-      </div>
-
+    <>
       {/* Stats row */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 12 }}>
         {[
@@ -127,7 +81,7 @@ export default function ScenarioPanel({ scenario }) {
       </div>
       <div style={{ marginBottom: 12 }}>
         <ArmPanel
-          policy={activePolicyId}
+          policy={policyId}
           values={estimatedValues}
           counts={pullCounts}
           lastArm={state.lastArm}
@@ -209,6 +163,67 @@ export default function ScenarioPanel({ scenario }) {
       <div style={{ marginTop: 16 }}>
         <PosteriorChart betaParams={betaParams} labels={labels} />
       </div>
+    </>
+  )
+}
+
+// ── Outer component: description, policy switcher, and keyed runner ──────────
+
+export default function ScenarioPanel({ scenario }) {
+  const { description, defaultPolicy, policies, trueP, contextDim } = scenario
+
+  const [activePolicyId, setActivePolicyId] = useState(defaultPolicy)
+  const activePolicy = policies.find(p => p.id === activePolicyId) || policies[0]
+
+  const armConfig = useMemo(() => ({
+    ...sim.makeArmConfig(trueP),
+    ...(contextDim != null && { contextDim }),
+  }), [trueP, contextDim])
+
+  return (
+    <div>
+      {/* Scenario description */}
+      <div style={{
+        background: 'var(--color-background-secondary)',
+        borderRadius: 'var(--border-radius-md)',
+        padding: '10px 14px',
+        marginBottom: 12,
+        fontSize: 12,
+        color: 'var(--color-text-secondary)',
+        lineHeight: 1.5,
+      }}>
+        {description}
+      </div>
+
+      {/* Policy switcher */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 10, color: 'var(--color-text-secondary)', fontFamily: 'var(--font-mono)' }}>policy:</span>
+        {policies.map(p => (
+          <button
+            key={p.id}
+            onClick={() => setActivePolicyId(p.id)}
+            style={{
+              fontSize: 11, fontFamily: 'var(--font-mono)', padding: '4px 10px',
+              borderRadius: 'var(--border-radius-md)',
+              border: `0.5px solid ${activePolicyId === p.id ? p.color : 'var(--color-border-secondary)'}`,
+              background: activePolicyId === p.id ? p.color + '18' : 'transparent',
+              color: activePolicyId === p.id ? p.color : 'var(--color-text-secondary)',
+              cursor: 'pointer',
+            }}
+          >
+            {p.label}
+            <span style={{ fontSize: 9, marginLeft: 4, opacity: 0.7 }}>{p.meta}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Keyed runner — remounts (fresh state) when policy changes */}
+      <ScenarioRunner
+        key={activePolicyId}
+        scenario={scenario}
+        policyId={activePolicyId}
+        armConfig={armConfig}
+      />
     </div>
   )
 }
