@@ -17,7 +17,9 @@
       "Bash(VITE_SIMULATE=true npx vite build)",
       "Bash(VITE_SIMULATE=true npx vite --port 3000)",
       "Bash(python3 -c \":*)",
-      "Bash(python -c \":*)"
+      "Bash(python -c \":*)",
+      "Bash(python:*)",
+      "Bash(pip install:*)"
     ]
   }
 }

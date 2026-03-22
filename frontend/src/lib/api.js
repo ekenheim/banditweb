@@ -21,6 +21,9 @@ const MODEL_NAMES = {
   'bayesian-ucb': 'bayesian-ucb',
   exp3: 'exp3',
   lints: 'lints',
+  recommendations: 'recommendations',
+  pricing: 'pricing',
+  'checkout-recovery': 'checkout-recovery',
 }
 
 async function post(policy, body) {

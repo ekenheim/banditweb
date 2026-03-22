@@ -1,0 +1,11 @@
+{
+  "name": "pricing",
+  "implementation": "model.PricingBanditModel",
+  "parameters": {
+    "extra": {
+      "n_arms": "5",
+      "mlflow_experiment": "bandit-pricing",
+      "prices": "19.99,29.99,39.99,49.99,59.99"
+    }
+  }
+}

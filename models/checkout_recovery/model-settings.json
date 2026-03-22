@@ -1,0 +1,12 @@
+{
+  "name": "checkout-recovery",
+  "implementation": "model.CheckoutRecoveryBanditModel",
+  "parameters": {
+    "extra": {
+      "n_arms": "5",
+      "mlflow_experiment": "bandit-checkout-recovery",
+      "context_dim": "1",
+      "alpha": "0.8"
+    }
+  }
+}

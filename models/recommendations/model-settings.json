@@ -1,0 +1,12 @@
+{
+  "name": "recommendations",
+  "implementation": "model.RecommendationBanditModel",
+  "parameters": {
+    "extra": {
+      "n_arms": "5",
+      "mlflow_experiment": "bandit-recommendations",
+      "context_dim": "4",
+      "alpha": "1.0"
+    }
+  }
+}
